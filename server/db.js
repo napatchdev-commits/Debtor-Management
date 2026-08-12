@@ -24,7 +24,13 @@ const supabaseKey = (
 ).trim();
 
 export const isSupabaseConfigured = Boolean(rawSupabaseUrl && supabaseKey && rawSupabaseUrl.startsWith('http'));
-export const supabase = isSupabaseConfigured ? createClient(rawSupabaseUrl, supabaseKey) : null;
+
+export const supabase = isSupabaseConfigured ? createClient(rawSupabaseUrl, supabaseKey, {
+  auth: { persistSession: false, autoRefreshToken: false },
+  realtime: {
+    transport: typeof window !== 'undefined' && window.WebSocket ? window.WebSocket : class DummyWebSocket {}
+  }
+}) : null;
 
 export const getSupabaseClient = () => {
   if (!supabase) {
