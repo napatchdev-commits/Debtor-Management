@@ -23,15 +23,12 @@ const supabaseKey = (
   ''
 ).trim();
 
-if (!rawSupabaseUrl || !supabaseKey) {
-  console.warn('⚠️ Warning: SUPABASE_URL or SUPABASE_KEY environment variable is missing.');
-}
-
-export const supabase = (rawSupabaseUrl && supabaseKey) ? createClient(rawSupabaseUrl, supabaseKey) : null;
+export const isSupabaseConfigured = Boolean(rawSupabaseUrl && supabaseKey && rawSupabaseUrl.startsWith('http'));
+export const supabase = isSupabaseConfigured ? createClient(rawSupabaseUrl, supabaseKey) : null;
 
 export const getSupabaseClient = () => {
   if (!supabase) {
-    throw new Error('กรุณาตั้งค่า SUPABASE_URL และ SUPABASE_KEY ใน Vercel Environment Variables ให้ถูกต้อง');
+    throw new Error('ยังไม่ได้เชื่อมต่อ Supabase: กรุณากรอก SUPABASE_URL และ SUPABASE_KEY ใน Vercel Environment Variables ให้ถูกต้อง');
   }
   return supabase;
 };
@@ -52,8 +49,20 @@ export const dbAll = async (sql, params = []) => {
 };
 
 export const dbExec = async () => {
-  // No-op for Supabase (schema managed via Supabase SQL Editor)
+  // Managed via Supabase SQL Editor
 };
+
+// Helper for human-readable Supabase database errors
+function formatSupabaseError(error) {
+  if (!error) return 'เกิดข้อผิดพลาดในการเชื่อมต่อ Supabase';
+  if (error.code === '42P01' || error.message?.includes('relation') || error.message?.includes('does not exist')) {
+    return 'ไม่พบตารางใน Supabase: กรุณานำไฟล์ supabase/schema.sql ไปคัดลอกวางแล้วกด RUN ใน Supabase SQL Editor';
+  }
+  if (error.code === 'PGRST301' || error.message?.includes('JWT') || error.message?.includes('apikey')) {
+    return 'Supabase Key ไม่ถูกต้อง: กรุณาตรวจสอบ SUPABASE_KEY ใน Vercel Environment Variables';
+  }
+  return `Supabase DB Error (${error.code || 'DB'}): ${error.message}`;
+}
 
 // Supabase Real-Time Cloud Select Handler
 async function executeSupabaseSelect(sql, params = []) {
@@ -64,7 +73,7 @@ async function executeSupabaseSelect(sql, params = []) {
   if (upper.includes('FROM USERS')) {
     if (upper.includes('COUNT(')) {
       const { count, error } = await client.from('users').select('*', { count: 'exact', head: true });
-      if (error) throw new Error(`Supabase DB Error (${error.code || '42P01'}): ${error.message}. โปรดนำไฟล์ supabase/schema.sql ไปกด RUN ใน Supabase SQL Editor`);
+      if (error) throw new Error(formatSupabaseError(error));
       return [{ count: count || 0 }];
     }
     let query = client.from('users').select('*');
@@ -73,7 +82,7 @@ async function executeSupabaseSelect(sql, params = []) {
       else if (sql.includes('WHERE id =')) query = query.eq('id', params[0]);
     }
     const { data, error } = await query;
-    if (error) throw new Error(`Supabase DB Error (${error.code}): ${error.message}`);
+    if (error) throw new Error(formatSupabaseError(error));
     return data || [];
   }
 
@@ -85,7 +94,7 @@ async function executeSupabaseSelect(sql, params = []) {
         countQuery = countQuery.eq('status', params[0]);
       }
       const { count, error } = await countQuery;
-      if (error) throw new Error(`Supabase DB Error (${error.code}): ${error.message}`);
+      if (error) throw new Error(formatSupabaseError(error));
       return [{ count: count || 0, total: count || 0, maxId: 1 }];
     }
 
@@ -98,7 +107,7 @@ async function executeSupabaseSelect(sql, params = []) {
     query = query.order('created_at', { ascending: false });
 
     const { data, error } = await query;
-    if (error) throw new Error(`Supabase DB Error (${error.code}): ${error.message}`);
+    if (error) throw new Error(formatSupabaseError(error));
 
     const debtors = data || [];
     for (const d of debtors) {
@@ -114,7 +123,7 @@ async function executeSupabaseSelect(sql, params = []) {
   if (upper.includes('FROM JOBS')) {
     if (upper.includes('COUNT(')) {
       const { count, error } = await client.from('jobs').select('*', { count: 'exact', head: true });
-      if (error) throw new Error(`Supabase DB Error (${error.code}): ${error.message}`);
+      if (error) throw new Error(formatSupabaseError(error));
       return [{ count: count || 0, total: count || 0 }];
     }
 
@@ -126,7 +135,7 @@ async function executeSupabaseSelect(sql, params = []) {
     query = query.order('job_date', { ascending: false });
 
     const { data, error } = await query;
-    if (error) throw new Error(`Supabase DB Error (${error.code}): ${error.message}`);
+    if (error) throw new Error(formatSupabaseError(error));
 
     return (data || []).map(j => ({
       ...j,
@@ -144,7 +153,7 @@ async function executeSupabaseSelect(sql, params = []) {
     query = query.order('transaction_date', { ascending: false });
 
     const { data, error } = await query;
-    if (error) throw new Error(`Supabase DB Error (${error.code}): ${error.message}`);
+    if (error) throw new Error(formatSupabaseError(error));
 
     return (data || []).map(t => ({
       ...t,
@@ -169,7 +178,7 @@ async function executeSupabaseRun(sql, params = []) {
       name: params[2],
       role: params[3] || 'staff'
     }).select();
-    if (error) throw new Error(`Supabase DB Error (${error.code || 'DB'}): ${error.message}. โปรดนำไฟล์ supabase/schema.sql ไปกด RUN ใน Supabase SQL Editor`);
+    if (error) throw new Error(formatSupabaseError(error));
     return { lastID: data[0]?.id, changes: 1 };
   }
 
@@ -183,7 +192,7 @@ async function executeSupabaseRun(sql, params = []) {
       note: params[5],
       status: params[6] || 'active'
     }).select();
-    if (error) throw new Error(`Supabase DB Error (${error.code}): ${error.message}`);
+    if (error) throw new Error(formatSupabaseError(error));
     return { lastID: data[0]?.id, changes: 1 };
   }
 
@@ -197,7 +206,7 @@ async function executeSupabaseRun(sql, params = []) {
       note: params[5],
       updated_at: new Date().toISOString()
     }).eq('id', params[6]);
-    if (error) throw new Error(`Supabase DB Error (${error.code}): ${error.message}`);
+    if (error) throw new Error(formatSupabaseError(error));
     return { changes: 1 };
   }
 
@@ -212,7 +221,7 @@ async function executeSupabaseRun(sql, params = []) {
       note: params[6],
       created_by: params[7]
     }).select();
-    if (error) throw new Error(`Supabase DB Error (${error.code}): ${error.message}`);
+    if (error) throw new Error(formatSupabaseError(error));
     return { lastID: data[0]?.id, changes: 1 };
   }
 
@@ -223,7 +232,7 @@ async function executeSupabaseRun(sql, params = []) {
       net_wage: params[2],
       updated_at: new Date().toISOString()
     }).eq('id', params[3]);
-    if (error) throw new Error(`Supabase DB Error (${error.code}): ${error.message}`);
+    if (error) throw new Error(formatSupabaseError(error));
     return { changes: 1 };
   }
 
@@ -237,25 +246,25 @@ async function executeSupabaseRun(sql, params = []) {
       debt_after: params[5],
       created_by: params[6]
     }).select();
-    if (error) throw new Error(`Supabase DB Error (${error.code}): ${error.message}`);
+    if (error) throw new Error(formatSupabaseError(error));
     return { lastID: data[0]?.id, changes: 1 };
   }
 
   if (upper.startsWith('DELETE FROM DEBT_TRANSACTIONS')) {
     const { error } = await client.from('debt_transactions').delete().eq('debtor_id', params[0]);
-    if (error) throw new Error(`Supabase DB Error (${error.code}): ${error.message}`);
+    if (error) throw new Error(formatSupabaseError(error));
     return { changes: 1 };
   }
 
   if (upper.startsWith('DELETE FROM JOBS')) {
     const { error } = await client.from('jobs').delete().eq('id', params[0]);
-    if (error) throw new Error(`Supabase DB Error (${error.code}): ${error.message}`);
+    if (error) throw new Error(formatSupabaseError(error));
     return { changes: 1 };
   }
 
   if (upper.startsWith('DELETE FROM DEBTORS')) {
     const { error } = await client.from('debtors').delete().eq('id', params[0]);
-    if (error) throw new Error(`Supabase DB Error (${error.code}): ${error.message}`);
+    if (error) throw new Error(formatSupabaseError(error));
     return { changes: 1 };
   }
 
