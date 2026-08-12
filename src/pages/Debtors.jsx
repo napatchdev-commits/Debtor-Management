@@ -13,6 +13,7 @@ import {
   RefreshCw
 } from 'lucide-react';
 import { apiFetch, formatCurrency, formatDate } from '../services/api';
+import { DBEngine } from '../services/dbEngine';
 import { Modal } from '../components/Modal';
 import { ConfirmModal } from '../components/ConfirmModal';
 
@@ -42,25 +43,40 @@ export const Debtors = ({ onSelectDebtor }) => {
     try {
       setLoading(true);
       setError(null);
-      const queryParams = new URLSearchParams();
-      if (search) queryParams.append('search', search);
-      if (statusFilter) queryParams.append('status', statusFilter);
 
-      console.log('[FRONTEND] Fetching debtors from Supabase API...');
-      const res = await apiFetch(`/debtors?${queryParams.toString()}`);
-      console.log('[FRONTEND] Debtors query result:', res);
+      // Instant local cache load first (Sombat Apartment Innovation)
+      const localState = DBEngine.getState();
+      if (localState && Array.isArray(localState.debtors) && localState.debtors.length > 0) {
+        setDebtors(filterDebtors(localState.debtors, search, statusFilter));
+      }
 
-      if (res && Array.isArray(res.debtors)) {
-        setDebtors(res.debtors);
-      } else {
-        setDebtors([]);
+      // Sync fresh state from Supabase Cloud Engine
+      const freshState = await DBEngine.pullFromSupabase();
+      if (freshState && Array.isArray(freshState.debtors)) {
+        setDebtors(filterDebtors(freshState.debtors, search, statusFilter));
       }
     } catch (err) {
-      console.error('[FRONTEND] Debtors query error:', err);
-      setError(err.message || 'เกิดข้อผิดพลาดในการโหลดข้อมูลลูกหนี้จากฐานข้อมูล');
+      console.error('[Debtors] Sync error:', err);
+      setError(err.message || 'เกิดข้อผิดพลาดในการดึงข้อมูลลูกหนี้จากฐานข้อมูล');
     } finally {
       setLoading(false);
     }
+  };
+
+  const filterDebtors = (list, searchKeyword, status) => {
+    let result = list;
+    if (searchKeyword && searchKeyword.trim()) {
+      const term = searchKeyword.trim().toLowerCase();
+      result = result.filter(d => 
+        (d.code && d.code.toLowerCase().includes(term)) ||
+        (d.name && d.name.toLowerCase().includes(term)) ||
+        (d.phone && d.phone.toLowerCase().includes(term))
+      );
+    }
+    if (status) {
+      result = result.filter(d => d.status === status);
+    }
+    return result;
   };
 
   useEffect(() => {
@@ -142,7 +158,7 @@ export const Debtors = ({ onSelectDebtor }) => {
       setEditingDebtor(null);
       resetForm();
       
-      // Re-fetch directly from Supabase and setDebtors
+      // Pull fresh state directly from Supabase DBEngine
       await fetchDebtors();
     } catch (err) {
       setFormError(err.message || 'เกิดข้อผิดพลาดในการบันทึกข้อมูล');
@@ -211,12 +227,12 @@ export const Debtors = ({ onSelectDebtor }) => {
 
       {/* Debtors Content Table / Error / Empty State */}
       <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-        {loading ? (
+        {loading && debtors.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>
             <RefreshCw size={24} className="spin" style={{ marginBottom: '0.5rem' }} />
             <div>กำลังดึงข้อมูลลูกหนี้จาก Supabase...</div>
           </div>
-        ) : error ? (
+        ) : error && debtors.length === 0 ? (
           <div style={{ padding: '2.5rem', textAlign: 'center' }}>
             <div style={{
               display: 'inline-flex',
