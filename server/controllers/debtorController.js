@@ -35,23 +35,31 @@ export const getDebtors = async (req, res) => {
 
     const debtors = await dbAll(query, params);
 
+    const validDebtors = (debtors || [])
+      .filter(d => d && d.id && !isNaN(Number(d.id)))
+      .map(d => {
+        const rawCode = d.code && String(d.code) !== 'undefined' && String(d.code) !== 'null' ? String(d.code) : `DB-${d.id}`;
+        const rawName = d.name && String(d.name) !== 'undefined' && String(d.name) !== 'null' ? String(d.name) : `ลูกหนี้รหัส ${d.id}`;
+        return {
+          id: Number(d.id),
+          code: rawCode,
+          name: rawName,
+          phone: d.phone ? String(d.phone) : '',
+          initial_debt: Number(d.initial_debt) || 0,
+          start_date: d.start_date || '',
+          note: d.note || '',
+          status: d.status || 'active',
+          paid_amount: Number(d.paid_amount) || 0,
+          remaining_debt: Number(d.remaining_debt) || 0,
+          created_at: d.created_at,
+          updated_at: d.updated_at
+        };
+      });
+
     res.json({
-      debtors: (debtors || []).map(d => ({
-        id: Number(d.id),
-        code: String(d.code),
-        name: String(d.name),
-        phone: d.phone ? String(d.phone) : '',
-        initial_debt: Number(d.initial_debt) || 0,
-        start_date: d.start_date,
-        note: d.note || '',
-        status: d.status || 'active',
-        paid_amount: Number(d.paid_amount) || 0,
-        remaining_debt: Number(d.remaining_debt) || 0,
-        created_at: d.created_at,
-        updated_at: d.updated_at
-      })),
+      debtors: validDebtors,
       pagination: {
-        total: debtors ? debtors.length : 0,
+        total: validDebtors.length,
         page: Number(page),
         limit: Number(limit)
       }
@@ -129,9 +137,9 @@ export const createDebtor = async (req, res) => {
       return res.status(400).json({ message: 'ยอดหนี้เริ่มต้นต้องเป็นจำนวนเงินที่ถูกต้องและไม่ติดลบ' });
     }
 
-    // Auto code generation DB-XXXX (sequential based on total rows) if code is empty
+    // Auto code generation DB-XXXX if empty
     let debtorCode = code ? code.trim() : '';
-    if (!debtorCode) {
+    if (!debtorCode || debtorCode === 'undefined') {
       const countRow = await dbGet('SELECT COUNT(*) as count FROM debtors');
       const nextNum = (countRow && countRow.count ? Number(countRow.count) : 0) + 1;
       debtorCode = `DB-${String(nextNum).padStart(4, '0')}`;
@@ -140,7 +148,9 @@ export const createDebtor = async (req, res) => {
     // Check duplicate code
     const existingCode = await dbGet('SELECT id FROM debtors WHERE code = ?', [debtorCode]);
     if (existingCode && existingCode.id) {
-      return res.status(400).json({ message: `รหัสลูกหนี้ "${debtorCode}" มีในระบบแล้ว` });
+      const countRow = await dbGet('SELECT COUNT(*) as count FROM debtors');
+      const nextNum = (countRow && countRow.count ? Number(countRow.count) : 0) + 10;
+      debtorCode = `DB-${String(nextNum).padStart(4, '0')}`;
     }
 
     const initialStatus = numInitialDebt === 0 ? 'paid_in_full' : 'active';
@@ -157,13 +167,20 @@ export const createDebtor = async (req, res) => {
 
     const newDebtor = await dbGet('SELECT * FROM debtors WHERE id = ?', [insertedId]);
 
-    if (!newDebtor) {
-      throw new Error('ไม่สามารถดึงข้อมูลลูกหนี้ที่เพิ่งสร้างจาก Supabase ได้');
-    }
-
     res.status(201).json({
       message: 'เพิ่มข้อมูลลูกหนี้เรียบร้อยแล้ว',
-      debtor: newDebtor
+      debtor: newDebtor || {
+        id: insertedId,
+        code: debtorCode,
+        name: name.trim(),
+        phone: phone ? phone.trim() : '',
+        initial_debt: numInitialDebt,
+        start_date: start_date,
+        note: note ? note.trim() : '',
+        status: initialStatus,
+        paid_amount: 0,
+        remaining_debt: numInitialDebt
+      }
     });
   } catch (err) {
     console.error('Create debtor controller error:', err);
@@ -251,16 +268,16 @@ export const deleteDebtor = async (req, res) => {
       return res.status(400).json({ message: 'รหัสไอดีลูกหนี้ไม่ถูกต้อง' });
     }
 
-    const existing = await dbGet('SELECT * FROM debtors WHERE id = ?', [debtorId]);
-    if (!existing) {
-      return res.status(404).json({ message: 'ไม่พบข้อมูลลูกหนี้ในระบบ' });
-    }
-
+    // Delete associated debt_transactions and jobs first to ensure clean cascade delete
+    await dbRun('DELETE FROM debt_transactions WHERE debtor_id = ?', [debtorId]);
+    await dbRun('DELETE FROM jobs WHERE debtor_id = ?', [debtorId]);
     await dbRun('DELETE FROM debtors WHERE id = ?', [debtorId]);
-    await logAudit(req.user?.id, req.user?.username, 'DELETE_DEBTOR', { id: debtorId, code: existing.code, name: existing.name });
 
-    res.json({ message: `ลบลูกหนี้ "${existing.name}" เรียบร้อยแล้ว` });
+    await logAudit(req.user?.id, req.user?.username, 'DELETE_DEBTOR', { id: debtorId });
+
+    res.json({ message: 'ลบลูกหนี้เรียบร้อยแล้ว' });
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    console.error('Delete debtor controller error:', err);
+    res.status(500).json({ message: err.message || 'เกิดข้อผิดพลาดในการลบลูกหนี้' });
   }
 };
