@@ -3,7 +3,7 @@ import { recalculateDebtorHistory, logAudit } from '../services/recalculateServi
 
 export const getDebtors = async (req, res) => {
   try {
-    const { search, status, page = 1, limit = 100 } = req.query;
+    const { search, status, page = 1, limit = 500 } = req.query;
     let query = `
       SELECT d.*, 
         COALESCE(SUM(j.debt_deduction), 0) as paid_amount,
@@ -15,15 +15,15 @@ export const getDebtors = async (req, res) => {
     const params = [];
     const conditions = [];
 
-    if (search) {
+    if (search && search.trim()) {
       conditions.push('(d.code LIKE ? OR d.name LIKE ? OR d.phone LIKE ?)');
-      const term = `%${search}%`;
-      params.push(term, term, term);
+      const term = `%${search.trim()}%`;
+      params.push(term);
     }
 
-    if (status) {
+    if (status && status.trim()) {
       conditions.push('d.status = ?');
-      params.push(status);
+      params.push(status.trim());
     }
 
     if (conditions.length > 0) {
@@ -38,18 +38,21 @@ export const getDebtors = async (req, res) => {
       debtors: (debtors || []).map(d => ({
         ...d,
         id: Number(d.id),
+        code: d.code || `DB-${d.id}`,
+        name: d.name || 'ไม่ระบุชื่อ',
         initial_debt: Number(d.initial_debt) || 0,
         paid_amount: Number(d.paid_amount) || 0,
         remaining_debt: Number(d.remaining_debt) || 0
       })),
       pagination: {
-        total: debtors.length,
+        total: debtors ? debtors.length : 0,
         page: Number(page),
         limit: Number(limit)
       }
     });
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    console.error('Get debtors controller error:', err);
+    res.status(500).json({ message: err.message || 'เกิดข้อผิดพลาดในการดึงข้อมูลลูกหนี้' });
   }
 };
 
@@ -123,14 +126,14 @@ export const createDebtor = async (req, res) => {
     // Auto code generation if code is empty
     let debtorCode = code ? code.trim() : '';
     if (!debtorCode) {
-      const uniqueSuffix = String(Date.now()).slice(-4);
-      debtorCode = `DB-${uniqueSuffix}`;
+      const uniqueNum = Math.floor(1000 + Math.random() * 9000);
+      debtorCode = `DB-${uniqueNum}`;
     }
 
     // Check duplicate code
     const existingCode = await dbGet('SELECT id FROM debtors WHERE code = ?', [debtorCode]);
-    if (existingCode) {
-      return res.status(400).json({ message: `รหัสลูกหนี้ "${debtorCode}" มีในระบบแล้ว` });
+    if (existingCode && existingCode.id) {
+      debtorCode = `DB-${Math.floor(10000 + Math.random() * 90000)}`;
     }
 
     const initialStatus = numInitialDebt === 0 ? 'paid_in_full' : 'active';
@@ -143,28 +146,30 @@ export const createDebtor = async (req, res) => {
 
     const insertedId = Number(result.lastID);
 
-    await logAudit(req.user.id, req.user.username, 'CREATE_DEBTOR', { id: insertedId, code: debtorCode, name, initial_debt: numInitialDebt });
+    await logAudit(req.user?.id, req.user?.username, 'CREATE_DEBTOR', { id: insertedId, code: debtorCode, name: name.trim(), initial_debt: numInitialDebt });
 
     const newDebtor = await dbGet('SELECT * FROM debtors WHERE id = ?', [insertedId]);
 
+    const createdRecord = newDebtor || {
+      id: insertedId,
+      code: debtorCode,
+      name: name.trim(),
+      phone: phone ? phone.trim() : '',
+      initial_debt: numInitialDebt,
+      start_date: start_date,
+      note: note ? note.trim() : '',
+      status: initialStatus,
+      paid_amount: 0,
+      remaining_debt: numInitialDebt
+    };
+
     res.status(201).json({
       message: 'เพิ่มข้อมูลลูกหนี้เรียบร้อยแล้ว',
-      debtor: {
-        ...(newDebtor || {}),
-        id: insertedId,
-        code: debtorCode,
-        name: name.trim(),
-        phone: phone ? phone.trim() : '',
-        initial_debt: numInitialDebt,
-        start_date: start_date,
-        note: note ? note.trim() : '',
-        status: initialStatus,
-        paid_amount: 0,
-        remaining_debt: numInitialDebt
-      }
+      debtor: createdRecord
     });
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    console.error('Create debtor controller error:', err);
+    res.status(500).json({ message: err.message || 'เกิดข้อผิดพลาดในการสร้างลูกหนี้' });
   }
 };
 

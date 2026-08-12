@@ -106,7 +106,10 @@ async function executeSupabaseSelect(sql, params = []) {
         if (params.length > 0 && params[0]) countQuery = countQuery.eq('status', params[0]);
       }
       const { count, error } = await countQuery;
-      if (error) throw new Error(formatSupabaseError(error));
+      if (error) {
+        console.error('Supabase count error:', error);
+        return [{ count: 0, total: 0, maxId: 1 }];
+      }
       return [{ count: count || 0, total: count || 0, maxId: 1 }];
     }
 
@@ -115,10 +118,9 @@ async function executeSupabaseSelect(sql, params = []) {
     // Single debtor lookup by ID or Code
     if (sql.includes('WHERE d.id =') || sql.includes('WHERE id =')) {
       const targetId = Number(params[0]);
-      if (isNaN(targetId) || targetId <= 0) {
-        return [];
+      if (!isNaN(targetId) && targetId > 0) {
+        query = query.eq('id', targetId);
       }
-      query = query.eq('id', targetId);
     } else if (sql.includes('WHERE code =') || sql.includes('WHERE d.code =')) {
       if (params[0]) query = query.eq('code', params[0]);
     } else if (sql.includes('WHERE status =') || sql.includes('WHERE d.status =')) {
@@ -126,7 +128,7 @@ async function executeSupabaseSelect(sql, params = []) {
     }
 
     // Search term filtering
-    if (sql.includes('LIKE ?') && params.length > 0) {
+    if (sql.includes('LIKE ?') && params.length > 0 && typeof params[0] === 'string' && params[0].includes('%')) {
       const searchTerm = String(params[0]).replace(/%/g, '').trim();
       if (searchTerm) {
         query = query.or(`code.ilike.%${searchTerm}%,name.ilike.%${searchTerm}%,phone.ilike.%${searchTerm}%`);
@@ -136,7 +138,10 @@ async function executeSupabaseSelect(sql, params = []) {
     query = query.order('created_at', { ascending: false });
 
     const { data, error } = await query;
-    if (error) throw new Error(formatSupabaseError(error));
+    if (error) {
+      console.error('Supabase debtors query error:', error);
+      throw new Error(formatSupabaseError(error));
+    }
 
     const debtors = (data || []).map(d => ({
       ...d,
@@ -144,12 +149,27 @@ async function executeSupabaseSelect(sql, params = []) {
       initial_debt: Number(d.initial_debt) || 0
     }));
 
-    for (const d of debtors) {
-      const { data: jobs } = await client.from('jobs').select('debt_deduction').eq('debtor_id', d.id);
-      const paid = (jobs || []).reduce((acc, curr) => acc + (Number(curr.debt_deduction) || 0), 0);
-      d.paid_amount = paid;
-      d.remaining_debt = Math.max(0, d.initial_debt - paid);
+    // Calculate paid_amount and remaining_debt safely in bulk
+    try {
+      const { data: allJobs } = await client.from('jobs').select('debtor_id, debt_deduction');
+      const paidMap = (allJobs || []).reduce((acc, job) => {
+        const dId = Number(job.debtor_id);
+        acc[dId] = (acc[dId] || 0) + (Number(job.debt_deduction) || 0);
+        return acc;
+      }, {});
+
+      for (const d of debtors) {
+        const paid = paidMap[d.id] || 0;
+        d.paid_amount = paid;
+        d.remaining_debt = Math.max(0, d.initial_debt - paid);
+      }
+    } catch (e) {
+      for (const d of debtors) {
+        d.paid_amount = 0;
+        d.remaining_debt = d.initial_debt;
+      }
     }
+
     return debtors;
   }
 
@@ -172,7 +192,7 @@ async function executeSupabaseSelect(sql, params = []) {
       }
     }
 
-    if (sql.includes('LIKE ?') && params.length > 0) {
+    if (sql.includes('LIKE ?') && params.length > 0 && typeof params[0] === 'string' && params[0].includes('%')) {
       const term = String(params[0]).replace(/%/g, '').trim();
       if (term) {
         query = query.or(`location.ilike.%${term}%,description.ilike.%${term}%`);
@@ -252,17 +272,25 @@ async function executeSupabaseRun(sql, params = []) {
   }
 
   if (upper.startsWith('INSERT INTO DEBTORS')) {
-    const { data, error } = await client.from('debtors').insert({
+    const payload = {
       code: params[0],
       name: params[1],
-      phone: params[2],
-      initial_debt: Number(params[3]),
+      phone: params[2] || '',
+      initial_debt: Number(params[3]) || 0,
       start_date: params[4],
-      note: params[5],
+      note: params[5] || '',
       status: params[6] || 'active'
-    }).select();
-    if (error) throw new Error(formatSupabaseError(error));
-    return { lastID: Number(data[0]?.id), changes: 1 };
+    };
+
+    const { data, error } = await client.from('debtors').insert(payload).select();
+    if (error) {
+      console.error('Supabase INSERT DEBTORS error:', error);
+      throw new Error(formatSupabaseError(error));
+    }
+    if (!data || data.length === 0) {
+      throw new Error('ไม่สามารถเพิ่มข้อมูลลูกหนี้ลงใน Supabase ได้ (No rows returned)');
+    }
+    return { lastID: Number(data[0].id), changes: 1 };
   }
 
   if (upper.startsWith('UPDATE DEBTORS')) {
