@@ -3,6 +3,8 @@ import { apiFetch } from './api';
 const STORAGE_KEY = 'DEBTOR_SYSTEM_STATE_V1';
 const SNAPSHOT_KEY = 'DEBTOR_SYSTEM_SNAPSHOT_V1';
 
+let activePullPromise = null;
+
 export class DBEngine {
   static getState() {
     try {
@@ -26,34 +28,42 @@ export class DBEngine {
     }
   }
 
-  static async pullFromSupabase() {
-    try {
-      console.log('[DBEngine] Pulling fresh state from Supabase...');
-      const res = await apiFetch('/sync/pull');
-      
-      if (res && res.state) {
-        const state = {
-          debtors: Array.isArray(res.state.debtors) ? res.state.debtors : [],
-          jobs: Array.isArray(res.state.jobs) ? res.state.jobs : [],
-          transactions: Array.isArray(res.state.transactions) ? res.state.transactions : []
-        };
-
-        this.saveStateLocally(state);
-        localStorage.setItem(SNAPSHOT_KEY, JSON.stringify(state));
-        console.log('[DBEngine] Pull success. State loaded:', state);
-        return state;
-      }
-    } catch (err) {
-      console.error('[DBEngine] Pull failed, using local cache:', err);
+  static async pullFromSupabase(force = false) {
+    // Deduplicate concurrent pull requests across components
+    if (activePullPromise && !force) {
+      return activePullPromise;
     }
 
-    return this.getState();
+    activePullPromise = (async () => {
+      try {
+        const res = await apiFetch('/sync/pull');
+        
+        if (res && res.state) {
+          const state = {
+            debtors: Array.isArray(res.state.debtors) ? res.state.debtors : [],
+            jobs: Array.isArray(res.state.jobs) ? res.state.jobs : [],
+            transactions: Array.isArray(res.state.transactions) ? res.state.transactions : []
+          };
+
+          this.saveStateLocally(state);
+          localStorage.setItem(SNAPSHOT_KEY, JSON.stringify(state));
+          return state;
+        }
+      } catch (err) {
+        console.error('[DBEngine] Pull failed, using local cache:', err);
+      } finally {
+        activePullPromise = null;
+      }
+
+      return this.getState();
+    })();
+
+    return activePullPromise;
   }
 
   static async pushToSupabase(state) {
     this.saveStateLocally(state);
     try {
-      console.log('[DBEngine] Syncing state to Supabase cloud...');
       const res = await apiFetch('/sync/push', {
         method: 'POST',
         body: JSON.stringify({ state })
