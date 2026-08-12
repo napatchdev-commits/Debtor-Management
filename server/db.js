@@ -58,6 +58,9 @@ function formatSupabaseError(error) {
   if (error.code === '22P02') {
     return 'รูปแบบข้อมูล ID ไม่ถูกต้อง (Invalid ID parameter)';
   }
+  if (error.code === '23503') {
+    return 'ไม่สามารถลบข้อมูลได้ เนื่องจากมีข้อมูลที่เกี่ยวข้องอยู่';
+  }
   if (error.code === '42P01' || error.message?.includes('relation') || error.message?.includes('does not exist')) {
     return 'ไม่พบตารางใน Supabase: กรุณานำไฟล์ supabase/schema.sql ไปกด RUN ใน Supabase SQL Editor';
   }
@@ -86,7 +89,7 @@ async function executeSupabaseSelect(sql, params = []) {
     }
     const { data, error } = await query;
     if (error) throw new Error(formatSupabaseError(error));
-    return data || [];
+    return (data || []).map(u => ({ ...u, id: Number(u.id) }));
   }
 
   // 2. DEBTORS
@@ -216,6 +219,13 @@ async function executeSupabaseSelect(sql, params = []) {
     }));
   }
 
+  // 5. AUDIT LOGS
+  if (upper.includes('FROM AUDIT_LOGS')) {
+    const { data, error } = await client.from('audit_logs').select('*').order('created_at', { ascending: false });
+    if (error) return [];
+    return (data || []).map(a => ({ ...a, id: Number(a.id) }));
+  }
+
   return [];
 }
 
@@ -311,6 +321,17 @@ async function executeSupabaseRun(sql, params = []) {
     return { lastID: Number(data[0]?.id), changes: 1 };
   }
 
+  if (upper.startsWith('INSERT INTO AUDIT_LOGS')) {
+    const { data, error } = await client.from('audit_logs').insert({
+      user_id: params[0] ? Number(params[0]) : null,
+      username: params[1] || 'System',
+      action: params[2],
+      details: typeof params[3] === 'string' ? params[3] : JSON.stringify(params[3])
+    }).select();
+    if (error) console.error('Supabase audit log error:', error);
+    return { lastID: data && data[0] ? Number(data[0].id) : null, changes: 1 };
+  }
+
   if (upper.startsWith('DELETE FROM DEBT_TRANSACTIONS')) {
     const debtorId = Number(params[0]);
     if (isNaN(debtorId) || debtorId <= 0) {
@@ -336,6 +357,10 @@ async function executeSupabaseRun(sql, params = []) {
     if (isNaN(debtorId) || debtorId <= 0) {
       throw new Error('รหัสไอดีลูกหนี้ไม่ถูกต้อง');
     }
+    // Delete associated debt_transactions and jobs first to ensure clean cascade delete
+    await client.from('debt_transactions').delete().eq('debtor_id', debtorId);
+    await client.from('jobs').delete().eq('debtor_id', debtorId);
+
     const { error } = await client.from('debtors').delete().eq('id', debtorId);
     if (error) throw new Error(formatSupabaseError(error));
     return { changes: 1 };
