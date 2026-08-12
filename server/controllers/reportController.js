@@ -1,4 +1,4 @@
-import { dbAll, dbGet } from '../db.js';
+import { dbAll } from '../db.js';
 
 export const getReportsData = async (req, res) => {
   try {
@@ -8,16 +8,37 @@ export const getReportsData = async (req, res) => {
     let summary = {};
 
     if (reportType === 'debtors') {
-      data = await dbAll(`
-        SELECT d.*,
-          COALESCE(SUM(j.debt_deduction), 0) as paid_amount,
-          MAX(0, d.initial_debt - COALESCE(SUM(j.debt_deduction), 0)) as remaining_debt,
-          COUNT(j.id) as job_count
-        FROM debtors d
-        LEFT JOIN jobs j ON d.id = j.debtor_id
-        GROUP BY d.id
-        ORDER BY d.code ASC
-      `);
+      const debtors = (await dbAll('SELECT * FROM debtors')) || [];
+      const jobs = (await dbAll('SELECT * FROM jobs')) || [];
+
+      const paidMap = jobs.reduce((acc, j) => {
+        const dId = Number(j.debtor_id);
+        acc[dId] = (acc[dId] || 0) + (Number(j.debt_deduction) || 0);
+        return acc;
+      }, {});
+
+      const jobCountMap = jobs.reduce((acc, j) => {
+        const dId = Number(j.debtor_id);
+        acc[dId] = (acc[dId] || 0) + 1;
+        return acc;
+      }, {});
+
+      data = debtors.map(d => {
+        const id = Number(d.id);
+        const initial_debt = Number(d.initial_debt) || 0;
+        const paid_amount = paidMap[id] || 0;
+        const remaining_debt = Math.max(0, initial_debt - paid_amount);
+        return {
+          ...d,
+          id,
+          initial_debt,
+          paid_amount,
+          remaining_debt,
+          job_count: jobCountMap[id] || 0
+        };
+      });
+
+      data.sort((a, b) => (a.code || '').localeCompare(b.code || '', undefined, { numeric: true }));
 
       const totalInitial = data.reduce((acc, curr) => acc + curr.initial_debt, 0);
       const totalPaid = data.reduce((acc, curr) => acc + curr.paid_amount, 0);
@@ -30,37 +51,31 @@ export const getReportsData = async (req, res) => {
         totalRemaining
       };
     } else if (reportType === 'jobs' || reportType === 'wages' || reportType === 'advances' || reportType === 'deductions') {
-      let query = `
-        SELECT j.*, d.code as debtor_code, d.name as debtor_name, d.phone as debtor_phone
-        FROM jobs j
-        JOIN debtors d ON j.debtor_id = d.id
-      `;
-      const params = [];
-      const conditions = [];
+      let jobs = (await dbAll('SELECT * FROM jobs')) || [];
 
       if (startDate) {
-        conditions.push('j.job_date >= ?');
-        params.push(startDate);
+        jobs = jobs.filter(j => j.job_date && j.job_date >= startDate);
       }
       if (endDate) {
-        conditions.push('j.job_date <= ?');
-        params.push(endDate);
+        jobs = jobs.filter(j => j.job_date && j.job_date <= endDate);
       }
-      if (debtorId) {
-        conditions.push('j.debtor_id = ?');
-        params.push(debtorId);
+      if (debtorId && !isNaN(Number(debtorId))) {
+        jobs = jobs.filter(j => Number(j.debtor_id) === Number(debtorId));
       }
       if (year && month) {
-        conditions.push("strftime('%Y-%m', j.job_date) = ?");
-        params.push(`${year}-${String(month).padStart(2, '0')}`);
+        const targetYM = `${year}-${String(month).padStart(2, '0')}`;
+        jobs = jobs.filter(j => j.job_date && String(j.job_date).startsWith(targetYM));
       }
 
-      if (conditions.length > 0) {
-        query += ' WHERE ' + conditions.join(' AND ');
-      }
-      query += ' ORDER BY date(j.job_date) DESC, j.id DESC';
-
-      data = await dbAll(query, params);
+      data = jobs.map(j => ({
+        ...j,
+        wage: Number(j.wage) || 0,
+        advance_withdraw: Number(j.advance_withdraw) || 0,
+        debt_deduction: Number(j.debt_deduction) || 0,
+        net_wage: Number(j.net_wage) || 0,
+        debtor_code: j.debtor_code || j.debtors?.code || '',
+        debtor_name: j.debtor_name || j.debtors?.name || ''
+      }));
 
       const totalWage = data.reduce((acc, curr) => acc + curr.wage, 0);
       const totalAdvance = data.reduce((acc, curr) => acc + curr.advance_withdraw, 0);
@@ -75,34 +90,25 @@ export const getReportsData = async (req, res) => {
         totalNetWage
       };
     } else if (reportType === 'transactions') {
-      let query = `
-        SELECT t.*, d.code as debtor_code, d.name as debtor_name, j.location as job_location
-        FROM debt_transactions t
-        JOIN debtors d ON t.debtor_id = d.id
-        JOIN jobs j ON t.job_id = j.id
-      `;
-      const params = [];
-      const conditions = [];
+      let transactions = (await dbAll('SELECT * FROM debt_transactions')) || [];
 
       if (startDate) {
-        conditions.push('t.transaction_date >= ?');
-        params.push(startDate);
+        transactions = transactions.filter(t => t.transaction_date && t.transaction_date >= startDate);
       }
       if (endDate) {
-        conditions.push('t.transaction_date <= ?');
-        params.push(endDate);
+        transactions = transactions.filter(t => t.transaction_date && t.transaction_date <= endDate);
       }
-      if (debtorId) {
-        conditions.push('t.debtor_id = ?');
-        params.push(debtorId);
+      if (debtorId && !isNaN(Number(debtorId))) {
+        transactions = transactions.filter(t => Number(t.debtor_id) === Number(debtorId));
       }
 
-      if (conditions.length > 0) {
-        query += ' WHERE ' + conditions.join(' AND ');
-      }
-      query += ' ORDER BY date(t.transaction_date) DESC, t.id DESC';
-
-      data = await dbAll(query, params);
+      data = transactions.map(t => ({
+        ...t,
+        deducted_amount: Number(t.deducted_amount) || 0,
+        debtor_code: t.debtor_code || t.debtors?.code || '',
+        debtor_name: t.debtor_name || t.debtors?.name || '',
+        job_location: t.job_location || t.jobs?.location || ''
+      }));
 
       const totalDeducted = data.reduce((acc, curr) => acc + curr.deducted_amount, 0);
 
@@ -118,6 +124,7 @@ export const getReportsData = async (req, res) => {
       summary
     });
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    console.error('Get reports data error:', err);
+    res.status(500).json({ message: err.message || 'เกิดข้อผิดพลาดในการดึงข้อมูลรายงาน' });
   }
 };

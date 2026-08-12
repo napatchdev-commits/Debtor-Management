@@ -1,52 +1,39 @@
-import { dbGet, dbAll } from '../db.js';
+import { dbAll } from '../db.js';
 
 export const getDashboardStats = async (req, res) => {
   try {
     const now = new Date();
     const currentYearMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
-    // Total debtors
-    const totalDebtorsRow = await dbGet('SELECT COUNT(*) as total FROM debtors');
-    const totalDebtors = totalDebtorsRow ? totalDebtorsRow.total : 0;
+    const debtors = (await dbAll('SELECT * FROM debtors')) || [];
+    const jobs = (await dbAll('SELECT * FROM jobs')) || [];
+    const recentTx = (await dbAll('SELECT * FROM debt_transactions')) || [];
 
-    // Total initial debt
-    const totalInitialDebtRow = await dbGet('SELECT COALESCE(SUM(initial_debt), 0) as total FROM debtors');
-    const totalInitialDebt = totalInitialDebtRow ? totalInitialDebtRow.total : 0;
-
-    // Total debt deductions across all history
-    const totalDeductedRow = await dbGet('SELECT COALESCE(SUM(debt_deduction), 0) as total FROM jobs');
-    const totalDeducted = totalDeductedRow ? totalDeductedRow.total : 0;
-
-    // Remaining debt
+    const totalDebtors = debtors.length;
+    const totalInitialDebt = debtors.reduce((sum, d) => sum + (Number(d.initial_debt) || 0), 0);
+    const totalDeducted = jobs.reduce((sum, j) => sum + (Number(j.debt_deduction) || 0), 0);
     const remainingDebt = Math.max(0, totalInitialDebt - totalDeducted);
 
-    // Current month job stats
-    const currentMonthJobRow = await dbGet(
-      `SELECT 
-        COALESCE(SUM(wage), 0) as wage,
-        COALESCE(SUM(advance_withdraw), 0) as advance,
-        COALESCE(SUM(debt_deduction), 0) as deduction
-       FROM jobs 
-       WHERE strftime('%Y-%m', job_date) = ?`,
-      [currentYearMonth]
-    );
+    const currentMonthJobs = jobs.filter(j => j.job_date && String(j.job_date).startsWith(currentYearMonth));
+    const currentMonthWage = currentMonthJobs.reduce((sum, j) => sum + (Number(j.wage) || 0), 0);
+    const currentMonthAdvance = currentMonthJobs.reduce((sum, j) => sum + (Number(j.advance_withdraw) || 0), 0);
+    const currentMonthDeduction = currentMonthJobs.reduce((sum, j) => sum + (Number(j.debt_deduction) || 0), 0);
 
-    // Paid in full debtors count
-    const paidInFullRow = await dbGet("SELECT COUNT(*) as total FROM debtors WHERE status = 'paid_in_full'");
-    const paidInFullCount = paidInFullRow ? paidInFullRow.total : 0;
+    const paidInFullCount = debtors.filter(d => {
+      const dId = Number(d.id);
+      const dPaid = jobs.filter(j => Number(j.debtor_id) === dId).reduce((sum, j) => sum + (Number(j.debt_deduction) || 0), 0);
+      const rem = Math.max(0, (Number(d.initial_debt) || 0) - dPaid);
+      return rem <= 0 && Number(d.initial_debt) > 0;
+    }).length;
 
-    // Active debtors count
     const activeDebtorsCount = Math.max(0, totalDebtors - paidInFullCount);
 
-    // Recent debt transactions (up to 5)
-    const recentTransactions = await dbAll(
-      `SELECT t.*, d.code as debtor_code, d.name as debtor_name, j.location as job_location
-       FROM debt_transactions t
-       JOIN debtors d ON t.debtor_id = d.id
-       JOIN jobs j ON t.job_id = j.id
-       ORDER BY t.created_at DESC
-       LIMIT 5`
-    );
+    const recentTransactions = recentTx.slice(0, 5).map(t => ({
+      ...t,
+      debtor_code: t.debtor_code || t.debtors?.code || '',
+      debtor_name: t.debtor_name || t.debtors?.name || '',
+      job_location: t.job_location || t.jobs?.location || ''
+    }));
 
     res.json({
       stats: {
@@ -58,14 +45,15 @@ export const getDashboardStats = async (req, res) => {
         remainingDebt,
         currentMonth: {
           yearMonth: currentYearMonth,
-          wage: currentMonthJobRow ? currentMonthJobRow.wage : 0,
-          advance: currentMonthJobRow ? currentMonthJobRow.advance : 0,
-          deduction: currentMonthJobRow ? currentMonthJobRow.deduction : 0
+          wage: currentMonthWage,
+          advance: currentMonthAdvance,
+          deduction: currentMonthDeduction
         }
       },
       recentTransactions
     });
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    console.error('Get dashboard stats error:', err);
+    res.status(500).json({ message: err.message || 'เกิดข้อผิดพลาดในการดึงข้อมูลแดชบอร์ด' });
   }
 };

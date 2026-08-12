@@ -1,98 +1,108 @@
-import { dbRun, dbGet, dbAll } from '../db.js';
+import { dbAll } from '../db.js';
 
 export const getMonthlySummary = async (req, res) => {
   try {
     const now = new Date();
     const selectedYear = req.query.year ? String(req.query.year) : String(now.getFullYear());
     const selectedMonth = req.query.month ? String(req.query.month).padStart(2, '0') : String(now.getMonth() + 1).padStart(2, '0');
-    const selectedDebtorId = req.query.debtor_id ? Number(req.query.debtor_id) : null;
+    const selectedDebtorId = req.query.debtor_id && !isNaN(Number(req.query.debtor_id)) ? Number(req.query.debtor_id) : null;
 
     const yearMonthStr = `${selectedYear}-${selectedMonth}`;
 
-    // Total jobs calculation for the selected month
-    let jobQuery = `
-      SELECT 
-        COALESCE(SUM(wage), 0) as total_wage,
-        COALESCE(SUM(advance_withdraw), 0) as total_advance,
-        COALESCE(SUM(debt_deduction), 0) as total_deduction,
-        COUNT(DISTINCT debtor_id) as active_debtors_count
-      FROM jobs
-      WHERE strftime('%Y-%m', job_date) = ?
-    `;
-    const jobParams = [yearMonthStr];
-    if (selectedDebtorId) {
-      jobQuery += ' AND debtor_id = ?';
-      jobParams.push(selectedDebtorId);
-    }
-    const jobStats = await dbGet(jobQuery, jobParams);
+    // Fetch all debtors and jobs in bulk
+    const allDebtors = await dbAll('SELECT * FROM debtors');
+    const allJobs = await dbAll('SELECT * FROM jobs');
 
-    // Debtor breakdown list for selected month
-    let debtorBreakdownQuery = `
-      SELECT 
-        d.id as debtor_id,
-        d.code as debtor_code,
-        d.name as debtor_name,
-        d.phone as debtor_phone,
-        d.initial_debt,
-        d.status,
-        COALESCE(SUM(j.wage), 0) as monthly_wage,
-        COALESCE(SUM(j.advance_withdraw), 0) as monthly_advance,
-        COALESCE(SUM(j.debt_deduction), 0) as monthly_deduction,
-        COUNT(j.id) as job_count
-      FROM debtors d
-      LEFT JOIN jobs j ON d.id = j.debtor_id AND strftime('%Y-%m', j.job_date) = ?
-    `;
-    const breakdownParams = [yearMonthStr];
-    if (selectedDebtorId) {
-      debtorBreakdownQuery += ' WHERE d.id = ?';
-      breakdownParams.push(selectedDebtorId);
-    }
-    debtorBreakdownQuery += ' GROUP BY d.id ORDER BY d.code ASC';
-    const debtorsList = await dbAll(debtorBreakdownQuery, breakdownParams);
+    // Filter debtors list
+    const targetDebtors = (allDebtors || [])
+      .filter(d => d && d.id && !isNaN(Number(d.id)))
+      .filter(d => !selectedDebtorId || Number(d.id) === selectedDebtorId);
 
-    // Calculate start-of-month and end-of-month debt
-    // Start-of-month debt = initial_debt - debt_deductions prior to selected month
-    // End-of-month debt = start-of-month debt - debt_deductions during selected month
+    // Filter jobs for selected month and prior months
+    const currentMonthJobs = (allJobs || []).filter(j => {
+      if (!j || !j.job_date) return false;
+      const jYearMonth = String(j.job_date).substring(0, 7);
+      if (jYearMonth !== yearMonthStr) return false;
+      if (selectedDebtorId && Number(j.debtor_id) !== selectedDebtorId) return false;
+      return true;
+    });
+
+    const priorMonthJobs = (allJobs || []).filter(j => {
+      if (!j || !j.job_date) return false;
+      const jYearMonth = String(j.job_date).substring(0, 7);
+      return jYearMonth < yearMonthStr;
+    });
+
+    // Overall month statistics
+    const totalWage = currentMonthJobs.reduce((sum, j) => sum + (Number(j.wage) || 0), 0);
+    const totalAdvance = currentMonthJobs.reduce((sum, j) => sum + (Number(j.advance_withdraw) || 0), 0);
+    const totalDeduction = currentMonthJobs.reduce((sum, j) => sum + (Number(j.debt_deduction) || 0), 0);
+    
+    const activeDebtorIds = new Set(currentMonthJobs.map(j => Number(j.debtor_id)));
+    const activeDebtorsCount = activeDebtorIds.size;
+
     let totalStartDebt = 0;
     let totalEndDebt = 0;
     let paidInFullCount = 0;
 
-    for (const d of debtorsList) {
-      const priorDeductionsRow = await dbGet(
-        "SELECT COALESCE(SUM(debt_deduction), 0) as prior_paid FROM jobs WHERE debtor_id = ? AND strftime('%Y-%m', job_date) < ?",
-        [d.debtor_id, yearMonthStr]
-      );
-      const priorPaid = priorDeductionsRow ? priorDeductionsRow.prior_paid : 0;
-      
-      const startDebt = Math.max(0, d.initial_debt - priorPaid);
-      const endDebt = Math.max(0, startDebt - d.monthly_deduction);
+    const debtorsList = targetDebtors.map(d => {
+      const debtorId = Number(d.id);
+      const initialDebt = Number(d.initial_debt) || 0;
 
-      d.start_debt = startDebt;
-      d.end_debt = endDebt;
+      const dMonthJobs = currentMonthJobs.filter(j => Number(j.debtor_id) === debtorId);
+      const dPriorJobs = priorMonthJobs.filter(j => Number(j.debtor_id) === debtorId);
+
+      const monthlyWage = dMonthJobs.reduce((sum, j) => sum + (Number(j.wage) || 0), 0);
+      const monthlyAdvance = dMonthJobs.reduce((sum, j) => sum + (Number(j.advance_withdraw) || 0), 0);
+      const monthlyDeduction = dMonthJobs.reduce((sum, j) => sum + (Number(j.debt_deduction) || 0), 0);
+      const jobCount = dMonthJobs.length;
+
+      const priorPaid = dPriorJobs.reduce((sum, j) => sum + (Number(j.debt_deduction) || 0), 0);
+      const startDebt = Math.max(0, initialDebt - priorPaid);
+      const endDebt = Math.max(0, startDebt - monthlyDeduction);
 
       totalStartDebt += startDebt;
       totalEndDebt += endDebt;
 
-      if (endDebt === 0 && d.initial_debt > 0) {
+      const isPaidInFull = (endDebt === 0 && initialDebt > 0) || d.status === 'paid_in_full';
+      if (isPaidInFull) {
         paidInFullCount++;
       }
-    }
+
+      return {
+        debtor_id: debtorId,
+        debtor_code: d.code || `DB-${debtorId}`,
+        debtor_name: d.name || `ลูกหนี้รหัส ${debtorId}`,
+        debtor_phone: d.phone || '',
+        initial_debt: initialDebt,
+        status: isPaidInFull ? 'paid_in_full' : (d.status || 'active'),
+        monthly_wage: monthlyWage,
+        monthly_advance: monthlyAdvance,
+        monthly_deduction: monthlyDeduction,
+        job_count: jobCount,
+        start_debt: startDebt,
+        end_debt: endDebt
+      };
+    });
+
+    debtorsList.sort((a, b) => a.debtor_code.localeCompare(b.debtor_code, undefined, { numeric: true }));
 
     res.json({
       summary: {
         year: selectedYear,
         month: selectedMonth,
-        total_wage: jobStats.total_wage || 0,
-        total_advance: jobStats.total_advance || 0,
-        total_deduction: jobStats.total_deduction || 0,
+        total_wage: totalWage,
+        total_advance: totalAdvance,
+        total_deduction: totalDeduction,
         start_month_debt: totalStartDebt,
         end_month_debt: totalEndDebt,
-        active_debtors_count: jobStats.active_debtors_count || 0,
+        active_debtors_count: activeDebtorsCount,
         paid_in_full_count: paidInFullCount
       },
       debtors: debtorsList
     });
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    console.error('Get monthly summary error:', err);
+    res.status(500).json({ message: err.message || 'เกิดข้อผิดพลาดในการดึงข้อมูลสรุปรายเดือน' });
   }
 };
