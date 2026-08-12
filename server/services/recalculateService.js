@@ -1,4 +1,4 @@
-import { dbRun, dbGet, dbAll, saveDb } from '../db.js';
+import { dbRun, dbGet, dbAll } from '../db.js';
 
 /**
  * Recalculates the complete debt history and deduction transactions for a given debtor.
@@ -68,8 +68,6 @@ export const recalculateDebtorHistory = async (debtorId, userId = null) => {
       'UPDATE debtors SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
       [newStatus, debtorId]
     );
-
-    saveDb();
 
     return {
       debtorId,
