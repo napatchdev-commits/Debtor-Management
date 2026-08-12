@@ -4,6 +4,7 @@ import { recalculateDebtorHistory, logAudit } from '../services/recalculateServi
 export const getDebtors = async (req, res) => {
   try {
     const { search, status, page = 1, limit = 500 } = req.query;
+
     let query = `
       SELECT d.*, 
         COALESCE(SUM(j.debt_deduction), 0) as paid_amount,
@@ -36,13 +37,18 @@ export const getDebtors = async (req, res) => {
 
     res.json({
       debtors: (debtors || []).map(d => ({
-        ...d,
         id: Number(d.id),
-        code: d.code || `DB-${d.id}`,
-        name: d.name || 'ไม่ระบุชื่อ',
+        code: String(d.code),
+        name: String(d.name),
+        phone: d.phone ? String(d.phone) : '',
         initial_debt: Number(d.initial_debt) || 0,
+        start_date: d.start_date,
+        note: d.note || '',
+        status: d.status || 'active',
         paid_amount: Number(d.paid_amount) || 0,
-        remaining_debt: Number(d.remaining_debt) || 0
+        remaining_debt: Number(d.remaining_debt) || 0,
+        created_at: d.created_at,
+        updated_at: d.updated_at
       })),
       pagination: {
         total: debtors ? debtors.length : 0,
@@ -74,7 +80,7 @@ export const getDebtorById = async (req, res) => {
     `, [debtorId]);
 
     if (!debtor) {
-      return res.status(404).json({ message: 'ไม่พบข้อมูลลูกหนี้' });
+      return res.status(404).json({ message: 'ไม่พบข้อมูลลูกหนี้ในระบบ' });
     }
 
     // Jobs history
@@ -114,7 +120,7 @@ export const createDebtor = async (req, res) => {
   try {
     const { code, name, phone, initial_debt, start_date, note } = req.body;
 
-    if (!name || initial_debt === undefined || initial_debt === null || !start_date) {
+    if (!name || !name.trim() || initial_debt === undefined || initial_debt === null || !start_date) {
       return res.status(400).json({ message: 'กรุณากรอกชื่อ, ยอดหนี้เริ่มต้น และวันที่เริ่มต้นให้ครบถ้วน' });
     }
 
@@ -123,17 +129,18 @@ export const createDebtor = async (req, res) => {
       return res.status(400).json({ message: 'ยอดหนี้เริ่มต้นต้องเป็นจำนวนเงินที่ถูกต้องและไม่ติดลบ' });
     }
 
-    // Auto code generation if code is empty
+    // Auto code generation DB-XXXX (sequential based on total rows) if code is empty
     let debtorCode = code ? code.trim() : '';
     if (!debtorCode) {
-      const uniqueNum = Math.floor(1000 + Math.random() * 9000);
-      debtorCode = `DB-${uniqueNum}`;
+      const countRow = await dbGet('SELECT COUNT(*) as count FROM debtors');
+      const nextNum = (countRow && countRow.count ? Number(countRow.count) : 0) + 1;
+      debtorCode = `DB-${String(nextNum).padStart(4, '0')}`;
     }
 
     // Check duplicate code
     const existingCode = await dbGet('SELECT id FROM debtors WHERE code = ?', [debtorCode]);
     if (existingCode && existingCode.id) {
-      debtorCode = `DB-${Math.floor(10000 + Math.random() * 90000)}`;
+      return res.status(400).json({ message: `รหัสลูกหนี้ "${debtorCode}" มีในระบบแล้ว` });
     }
 
     const initialStatus = numInitialDebt === 0 ? 'paid_in_full' : 'active';
@@ -150,22 +157,13 @@ export const createDebtor = async (req, res) => {
 
     const newDebtor = await dbGet('SELECT * FROM debtors WHERE id = ?', [insertedId]);
 
-    const createdRecord = newDebtor || {
-      id: insertedId,
-      code: debtorCode,
-      name: name.trim(),
-      phone: phone ? phone.trim() : '',
-      initial_debt: numInitialDebt,
-      start_date: start_date,
-      note: note ? note.trim() : '',
-      status: initialStatus,
-      paid_amount: 0,
-      remaining_debt: numInitialDebt
-    };
+    if (!newDebtor) {
+      throw new Error('ไม่สามารถดึงข้อมูลลูกหนี้ที่เพิ่งสร้างจาก Supabase ได้');
+    }
 
     res.status(201).json({
       message: 'เพิ่มข้อมูลลูกหนี้เรียบร้อยแล้ว',
-      debtor: createdRecord
+      debtor: newDebtor
     });
   } catch (err) {
     console.error('Create debtor controller error:', err);
@@ -184,10 +182,10 @@ export const updateDebtor = async (req, res) => {
 
     const existing = await dbGet('SELECT * FROM debtors WHERE id = ?', [debtorId]);
     if (!existing) {
-      return res.status(404).json({ message: 'ไม่พบข้อมูลลูกหนี้' });
+      return res.status(404).json({ message: 'ไม่พบข้อมูลลูกหนี้ในระบบ' });
     }
 
-    if (!name || initial_debt === undefined || initial_debt === null || !start_date) {
+    if (!name || !name.trim() || initial_debt === undefined || initial_debt === null || !start_date) {
       return res.status(400).json({ message: 'กรุณากรอกชื่อ, ยอดหนี้เริ่มต้น และวันที่เริ่มต้นให้ครบถ้วน' });
     }
 
@@ -220,9 +218,9 @@ export const updateDebtor = async (req, res) => {
     );
 
     // Recalculate if initial debt changed
-    await recalculateDebtorHistory(debtorId, req.user.id);
+    await recalculateDebtorHistory(debtorId, req.user?.id);
 
-    await logAudit(req.user.id, req.user.username, 'UPDATE_DEBTOR', { id: debtorId, code, name, numInitialDebt });
+    await logAudit(req.user?.id, req.user?.username, 'UPDATE_DEBTOR', { id: debtorId, code, name, numInitialDebt });
 
     const updated = await dbGet(`
       SELECT d.*, 
@@ -255,11 +253,11 @@ export const deleteDebtor = async (req, res) => {
 
     const existing = await dbGet('SELECT * FROM debtors WHERE id = ?', [debtorId]);
     if (!existing) {
-      return res.status(404).json({ message: 'ไม่พบข้อมูลลูกหนี้' });
+      return res.status(404).json({ message: 'ไม่พบข้อมูลลูกหนี้ในระบบ' });
     }
 
     await dbRun('DELETE FROM debtors WHERE id = ?', [debtorId]);
-    await logAudit(req.user.id, req.user.username, 'DELETE_DEBTOR', { id: debtorId, code: existing.code, name: existing.name });
+    await logAudit(req.user?.id, req.user?.username, 'DELETE_DEBTOR', { id: debtorId, code: existing.code, name: existing.name });
 
     res.json({ message: `ลบลูกหนี้ "${existing.name}" เรียบร้อยแล้ว` });
   } catch (err) {
