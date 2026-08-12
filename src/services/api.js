@@ -6,6 +6,8 @@ export const apiFetch = async (endpoint, options = {}) => {
   const token = getAuthToken();
   const headers = {
     'Content-Type': 'application/json',
+    'Cache-Control': 'no-cache, no-store, must-revalidate',
+    'Pragma': 'no-cache',
     ...(options.headers || {})
   };
 
@@ -15,7 +17,8 @@ export const apiFetch = async (endpoint, options = {}) => {
 
   let response;
   try {
-    response = await fetch(`${API_BASE}${endpoint}`, {
+    const url = `${API_BASE}${endpoint}${endpoint.includes('?') ? '&' : '?'}_t=${Date.now()}`;
+    response = await fetch(url, {
       ...options,
       headers
     });

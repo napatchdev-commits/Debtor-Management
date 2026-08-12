@@ -44,7 +44,17 @@ export const Debtors = ({ onSelectDebtor }) => {
       if (statusFilter) queryParams.append('status', statusFilter);
 
       const res = await apiFetch(`/debtors?${queryParams.toString()}`);
-      setDebtors(res.debtors || []);
+      const validDebtors = (res.debtors || []).map(d => ({
+        ...d,
+        id: Number(d.id),
+        code: d.code || `DB-${d.id}`,
+        name: d.name || 'ไม่ระบุชื่อ',
+        initial_debt: Number(d.initial_debt) || 0,
+        paid_amount: Number(d.paid_amount) || 0,
+        remaining_debt: Number(d.remaining_debt) || 0
+      })).filter(d => d.id && !isNaN(d.id) && d.id > 0);
+
+      setDebtors(validDebtors);
     } catch (err) {
       console.error('Failed to fetch debtors:', err);
     } finally {
@@ -73,6 +83,10 @@ export const Debtors = ({ onSelectDebtor }) => {
   };
 
   const handleOpenEditModal = (debtor) => {
+    if (!debtor || !debtor.id || isNaN(Number(debtor.id))) {
+      alert('ข้อมูลลูกหนี้ไม่ถูกต้อง กรุณารีเฟรชแล้วลองอีกครั้ง');
+      return;
+    }
     setEditingDebtor(debtor);
     setCode(debtor.code || '');
     setName(debtor.name || '');
@@ -135,7 +149,11 @@ export const Debtors = ({ onSelectDebtor }) => {
   };
 
   const handleDeleteDebtor = async () => {
-    if (!deletingDebtor) return;
+    if (!deletingDebtor || !deletingDebtor.id || isNaN(Number(deletingDebtor.id))) {
+      alert('ไม่พบรหัสไอดีลูกหนี้ที่ถูกต้อง กรุณารีเฟรชแล้วลองอีกครั้ง');
+      setDeletingDebtor(null);
+      return;
+    }
     setSubmitting(true);
     try {
       await apiFetch(`/debtors/${deletingDebtor.id}`, {
@@ -423,11 +441,11 @@ export const Debtors = ({ onSelectDebtor }) => {
 
       {/* Delete Confirmation Modal */}
       <ConfirmModal
-        isOpen={!!deletingDebtor}
+        isOpen={!!deletingDebtor && !!deletingDebtor.id}
         onClose={() => setDeletingDebtor(null)}
         onConfirm={handleDeleteDebtor}
         title="ยืนยันการลบลูกหนี้"
-        message={`คุณต้องการลบข้อมูลลูกหนี้ "${deletingDebtor?.code} - ${deletingDebtor?.name}" ใช่หรือไม่? รายการงานและประวัติธุรกรรมทั้งหมดของลูกหนี้นี้จะถูกลบออกอย่างสมบูรณ์`}
+        message={`คุณต้องการลบข้อมูลลูกหนี้ "${deletingDebtor?.code || ''} - ${deletingDebtor?.name || ''}" ใช่หรือไม่? รายการงานและประวัติธุรกรรมทั้งหมดของลูกหนี้นี้จะถูกลบออกอย่างสมบูรณ์`}
         loading={submitting}
       />
     </div>
