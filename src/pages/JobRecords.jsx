@@ -14,6 +14,7 @@ import {
   Filter
 } from 'lucide-react';
 import { apiFetch, formatCurrency, formatDate } from '../services/api';
+import { DBEngine } from '../services/dbEngine';
 import { Modal } from '../components/Modal';
 import { ConfirmModal } from '../components/ConfirmModal';
 
@@ -52,15 +53,29 @@ export const JobRecords = ({ onSelectDebtor }) => {
   const fetchJobs = async () => {
     try {
       setLoading(true);
-      const params = new URLSearchParams();
-      if (search) params.append('search', search);
-      if (debtorFilter) params.append('debtor_id', debtorFilter);
-      if (locationFilter) params.append('location', locationFilter);
-      if (selectedYear) params.append('year', selectedYear);
-      if (selectedMonth) params.append('month', selectedMonth);
+      const state = await DBEngine.pullFromSupabase();
+      let jobList = state && Array.isArray(state.jobs) ? state.jobs : [];
 
-      const res = await apiFetch(`/jobs?${params.toString()}`);
-      setJobs(res.jobs || []);
+      if (search && search.trim()) {
+        const term = search.trim().toLowerCase();
+        jobList = jobList.filter(j => 
+          (j.location && j.location.toLowerCase().includes(term)) ||
+          (j.description && j.description.toLowerCase().includes(term)) ||
+          (j.debtor_name && j.debtor_name.toLowerCase().includes(term))
+        );
+      }
+      if (debtorFilter) {
+        jobList = jobList.filter(j => Number(j.debtor_id) === Number(debtorFilter));
+      }
+      if (selectedYear) {
+        jobList = jobList.filter(j => j.job_date && j.job_date.startsWith(selectedYear));
+      }
+      if (selectedMonth) {
+        const monthStr = String(selectedMonth).padStart(2, '0');
+        jobList = jobList.filter(j => j.job_date && j.job_date.slice(5, 7) === monthStr);
+      }
+
+      setJobs(jobList);
     } catch (err) {
       console.error('Failed to fetch jobs:', err);
     } finally {
@@ -70,10 +85,19 @@ export const JobRecords = ({ onSelectDebtor }) => {
 
   const fetchDebtorsDropdown = async () => {
     try {
-      const res = await apiFetch('/debtors?limit=500');
-      setDebtorsList(res.debtors || []);
+      // Instant load from DBEngine local state
+      const localState = DBEngine.getState();
+      if (localState && Array.isArray(localState.debtors) && localState.debtors.length > 0) {
+        setDebtorsList(localState.debtors);
+      }
+
+      // Pull fresh state from Supabase
+      const freshState = await DBEngine.pullFromSupabase();
+      if (freshState && Array.isArray(freshState.debtors)) {
+        setDebtorsList(freshState.debtors);
+      }
     } catch (err) {
-      console.error('Failed to fetch debtors list:', err);
+      console.error('Failed to fetch debtors dropdown:', err);
     }
   };
 
@@ -137,10 +161,12 @@ export const JobRecords = ({ onSelectDebtor }) => {
 
   const handleOpenAddModal = () => {
     resetForm();
+    fetchDebtorsDropdown();
     setIsAddModalOpen(true);
   };
 
   const handleOpenEditModal = (job) => {
+    fetchDebtorsDropdown();
     setEditingJob(job);
     setSelectedDebtorId(String(job.debtor_id));
     setJobDate(job.job_date);
@@ -211,8 +237,8 @@ export const JobRecords = ({ onSelectDebtor }) => {
 
       setIsAddModalOpen(false);
       resetForm();
-      fetchJobs();
-      fetchDebtorsDropdown();
+      await fetchJobs();
+      await fetchDebtorsDropdown();
     } catch (err) {
       setFormError(err.message || 'เกิดข้อผิดพลาดในการบันทึกงาน');
     } finally {
@@ -228,8 +254,8 @@ export const JobRecords = ({ onSelectDebtor }) => {
         method: 'DELETE'
       });
       setDeletingJob(null);
-      fetchJobs();
-      fetchDebtorsDropdown();
+      await fetchJobs();
+      await fetchDebtorsDropdown();
     } catch (err) {
       alert(err.message || 'ไม่สามารถลบรายการงานได้');
     } finally {
@@ -304,7 +330,7 @@ export const JobRecords = ({ onSelectDebtor }) => {
 
       {/* Jobs List Table */}
       <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-        {loading ? (
+        {loading && jobs.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>
             กำลังโหลดบันทึกงาน...
           </div>
