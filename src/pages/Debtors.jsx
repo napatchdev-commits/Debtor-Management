@@ -9,7 +9,8 @@ import {
   Phone, 
   Calendar, 
   FileText,
-  AlertCircle
+  AlertCircle,
+  RefreshCw
 } from 'lucide-react';
 import { apiFetch, formatCurrency, formatDate } from '../services/api';
 import { Modal } from '../components/Modal';
@@ -18,6 +19,7 @@ import { ConfirmModal } from '../components/ConfirmModal';
 export const Debtors = ({ onSelectDebtor }) => {
   const [debtors, setDebtors] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
 
@@ -39,24 +41,23 @@ export const Debtors = ({ onSelectDebtor }) => {
   const fetchDebtors = async () => {
     try {
       setLoading(true);
+      setError(null);
       const queryParams = new URLSearchParams();
       if (search) queryParams.append('search', search);
       if (statusFilter) queryParams.append('status', statusFilter);
 
+      console.log('[FRONTEND] Fetching debtors from Supabase API...');
       const res = await apiFetch(`/debtors?${queryParams.toString()}`);
-      const validDebtors = (res.debtors || []).map(d => ({
-        ...d,
-        id: Number(d.id),
-        code: d.code || `DB-${d.id}`,
-        name: d.name || 'ไม่ระบุชื่อ',
-        initial_debt: Number(d.initial_debt) || 0,
-        paid_amount: Number(d.paid_amount) || 0,
-        remaining_debt: Number(d.remaining_debt) || 0
-      })).filter(d => d.id && !isNaN(d.id) && d.id > 0);
+      console.log('[FRONTEND] Debtors query result:', res);
 
-      setDebtors(validDebtors);
+      if (res && Array.isArray(res.debtors)) {
+        setDebtors(res.debtors);
+      } else {
+        setDebtors([]);
+      }
     } catch (err) {
-      console.error('Failed to fetch debtors:', err);
+      console.error('[FRONTEND] Debtors query error:', err);
+      setError(err.message || 'เกิดข้อผิดพลาดในการโหลดข้อมูลลูกหนี้จากฐานข้อมูล');
     } finally {
       setLoading(false);
     }
@@ -140,7 +141,9 @@ export const Debtors = ({ onSelectDebtor }) => {
       setIsAddModalOpen(false);
       setEditingDebtor(null);
       resetForm();
-      fetchDebtors();
+      
+      // Re-fetch directly from Supabase and setDebtors
+      await fetchDebtors();
     } catch (err) {
       setFormError(err.message || 'เกิดข้อผิดพลาดในการบันทึกข้อมูล');
     } finally {
@@ -160,7 +163,7 @@ export const Debtors = ({ onSelectDebtor }) => {
         method: 'DELETE'
       });
       setDeletingDebtor(null);
-      fetchDebtors();
+      await fetchDebtors();
     } catch (err) {
       alert(err.message || 'ไม่สามารถลบลูกหนี้ได้');
     } finally {
@@ -206,11 +209,35 @@ export const Debtors = ({ onSelectDebtor }) => {
         </select>
       </div>
 
-      {/* Debtors List Table */}
+      {/* Debtors Content Table / Error / Empty State */}
       <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
         {loading ? (
           <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>
-            กำลังโหลดข้อมูลลูกหนี้...
+            <RefreshCw size={24} className="spin" style={{ marginBottom: '0.5rem' }} />
+            <div>กำลังดึงข้อมูลลูกหนี้จาก Supabase...</div>
+          </div>
+        ) : error ? (
+          <div style={{ padding: '2.5rem', textAlign: 'center' }}>
+            <div style={{
+              display: 'inline-flex',
+              padding: '1rem',
+              background: 'rgba(239, 68, 68, 0.15)',
+              borderRadius: '50%',
+              color: '#f87171',
+              marginBottom: '1rem'
+            }}>
+              <AlertCircle size={32} />
+            </div>
+            <h3 style={{ color: '#f87171', fontSize: '1.1rem', marginBottom: '0.5rem' }}>
+              เกิดข้อผิดพลาดในการโหลดข้อมูลลูกหนี้
+            </h3>
+            <p style={{ color: 'var(--text-dim)', fontSize: '0.9rem', marginBottom: '1.25rem', maxWidth: '500px', margin: '0 auto 1.25rem' }}>
+              {error}
+            </p>
+            <button className="btn btn-secondary" onClick={fetchDebtors}>
+              <RefreshCw size={16} />
+              <span>ลองใหม่อีกครั้ง</span>
+            </button>
           </div>
         ) : debtors.length === 0 ? (
           <div className="empty-state">
