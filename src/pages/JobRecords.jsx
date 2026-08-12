@@ -181,6 +181,7 @@ export const JobRecords = ({ onSelectDebtor }) => {
 
   const handleSubmitForm = async (e) => {
     e.preventDefault();
+    if (submitting) return;
     setFormError('');
 
     if (!selectedDebtorId) {
@@ -247,7 +248,7 @@ export const JobRecords = ({ onSelectDebtor }) => {
   };
 
   const handleDeleteJob = async () => {
-    if (!deletingJob) return;
+    if (!deletingJob || submitting) return;
     setSubmitting(true);
     try {
       await apiFetch(`/jobs/${deletingJob.id}`, {
@@ -458,11 +459,13 @@ export const JobRecords = ({ onSelectDebtor }) => {
               required
             >
               <option value="">-- เลือกลูกหนี้ --</option>
-              {debtorsList.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.code} - {d.name} ({d.remaining_debt <= 0 ? 'ชำระหมด' : `ยอดหนี้คงเหลือ ${formatCurrency(d.remaining_debt)}`})
-                </option>
-              ))}
+              {debtorsList
+                .filter((d) => d && d.id && !isNaN(Number(d.id)) && Number(d.id) > 0)
+                .map((d) => (
+                  <option key={d.id} value={String(d.id)}>
+                    {d.code} - {d.name} ({d.remaining_debt <= 0 ? 'ชำระหมด' : `ยอดหนี้คงเหลือ ${formatCurrency(d.remaining_debt)}`})
+                  </option>
+                ))}
             </select>
           </div>
 

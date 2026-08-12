@@ -89,9 +89,15 @@ async function executeSupabaseSelect(sql, params = []) {
       return [{ count: count || 0 }];
     }
     let query = client.from('users').select('*');
-    if (params.length > 0 && params[0] !== undefined && params[0] !== null) {
-      if (sql.includes('WHERE username =')) query = query.eq('username', params[0]);
-      else if (sql.includes('WHERE id =')) query = query.eq('id', Number(params[0]));
+    if (params.length > 0) {
+      if (sql.includes('WHERE username =')) {
+        if (!params[0]) return [];
+        query = query.eq('username', params[0]);
+      } else if (sql.includes('WHERE id =')) {
+        const targetId = Number(params[0]);
+        if (isNaN(targetId) || targetId <= 0) return [];
+        query = query.eq('id', targetId);
+      }
     }
     const { data, error } = await query;
     if (error) throw new Error(formatSupabaseError(error));
@@ -118,13 +124,14 @@ async function executeSupabaseSelect(sql, params = []) {
     // Single debtor lookup by ID or Code
     if (sql.includes('WHERE d.id =') || sql.includes('WHERE id =')) {
       const targetId = Number(params[0]);
-      if (!isNaN(targetId) && targetId > 0) {
-        query = query.eq('id', targetId);
-      }
+      if (isNaN(targetId) || targetId <= 0) return [];
+      query = query.eq('id', targetId);
     } else if (sql.includes('WHERE code =') || sql.includes('WHERE d.code =')) {
-      if (params[0]) query = query.eq('code', params[0]);
+      if (!params[0]) return [];
+      query = query.eq('code', params[0]);
     } else if (sql.includes('WHERE status =') || sql.includes('WHERE d.status =')) {
-      if (params[0]) query = query.eq('status', params[0]);
+      if (!params[0]) return [];
+      query = query.eq('status', params[0]);
     }
 
     // Search term filtering
@@ -182,13 +189,15 @@ async function executeSupabaseSelect(sql, params = []) {
     }
 
     let query = client.from('jobs').select('*, debtors(code, name)');
-    if (params.length > 0 && params[0] !== undefined && params[0] !== null) {
+    if (params.length > 0) {
       if (sql.includes('WHERE j.id =') || sql.includes('WHERE id =')) {
         const jobId = Number(params[0]);
-        if (!isNaN(jobId) && jobId > 0) query = query.eq('id', jobId);
+        if (isNaN(jobId) || jobId <= 0) return [];
+        query = query.eq('id', jobId);
       } else if (sql.includes('WHERE j.debtor_id =') || sql.includes('WHERE debtor_id =')) {
         const debtorId = Number(params[0]);
-        if (!isNaN(debtorId) && debtorId > 0) query = query.eq('debtor_id', debtorId);
+        if (isNaN(debtorId) || debtorId <= 0) return [];
+        query = query.eq('debtor_id', debtorId);
       }
     }
 
@@ -220,10 +229,15 @@ async function executeSupabaseSelect(sql, params = []) {
   // 4. DEBT TRANSACTIONS
   if (upper.includes('FROM DEBT_TRANSACTIONS')) {
     let query = client.from('debt_transactions').select('*, debtors(code, name), jobs(location)');
-    if (params.length > 0 && params[0] !== undefined && params[0] !== null) {
+    if (params.length > 0) {
       if (sql.includes('WHERE t.debtor_id =') || sql.includes('WHERE debtor_id =')) {
         const debtorId = Number(params[0]);
-        if (!isNaN(debtorId) && debtorId > 0) query = query.eq('debtor_id', debtorId);
+        if (isNaN(debtorId) || debtorId <= 0) return [];
+        query = query.eq('debtor_id', debtorId);
+      } else if (sql.includes('WHERE t.job_id =') || sql.includes('WHERE job_id =')) {
+        const jobId = Number(params[0]);
+        if (isNaN(jobId) || jobId <= 0) return [];
+        query = query.eq('job_id', jobId);
       }
     }
     query = query.order('transaction_date', { ascending: false });
@@ -294,19 +308,32 @@ async function executeSupabaseRun(sql, params = []) {
   }
 
   if (upper.startsWith('UPDATE DEBTORS')) {
-    const targetId = Number(params[6]);
+    const targetId = Number(params[params.length - 1]);
     if (isNaN(targetId) || targetId <= 0) {
       throw new Error('รหัสไอดีลูกหนี้ไม่ถูกต้อง');
     }
-    const { error } = await client.from('debtors').update({
+
+    if (sql.includes('status =') && params.length === 2) {
+      const status = params[0];
+      const { error } = await client.from('debtors').update({
+        status,
+        updated_at: new Date().toISOString()
+      }).eq('id', targetId);
+      if (error) throw new Error(formatSupabaseError(error));
+      return { changes: 1 };
+    }
+
+    const payload = {
       code: params[0],
       name: params[1],
-      phone: params[2],
-      initial_debt: Number(params[3]),
+      phone: params[2] || '',
+      initial_debt: Number(params[3]) || 0,
       start_date: params[4],
-      note: params[5],
+      note: params[5] || '',
       updated_at: new Date().toISOString()
-    }).eq('id', targetId);
+    };
+
+    const { error } = await client.from('debtors').update(payload).eq('id', targetId);
     if (error) throw new Error(formatSupabaseError(error));
     return { changes: 1 };
   }
@@ -327,16 +354,40 @@ async function executeSupabaseRun(sql, params = []) {
   }
 
   if (upper.startsWith('UPDATE JOBS')) {
-    const jobId = Number(params[3]);
+    const jobId = Number(params[params.length - 1]);
     if (isNaN(jobId) || jobId <= 0) {
       throw new Error('รหัสรายการงานไม่ถูกต้อง');
     }
-    const { error } = await client.from('jobs').update({
-      advance_withdraw: Number(params[0]),
-      debt_deduction: Number(params[1]),
-      net_wage: Number(params[2]),
+
+    const updatePayload = {
       updated_at: new Date().toISOString()
-    }).eq('id', jobId);
+    };
+
+    // Case 1: Recalculate update -> SET advance_withdraw = ?, debt_deduction = ?, net_wage = ? WHERE id = ?
+    if (sql.includes('debt_deduction =')) {
+      updatePayload.advance_withdraw = Number(params[0]) || 0;
+      updatePayload.debt_deduction = Number(params[1]) || 0;
+      updatePayload.net_wage = Number(params[2]) || 0;
+    }
+    // Case 2: Full job edit -> SET debtor_id = ?, job_date = ?, location = ?, description = ?, wage = ?, advance_withdraw = ?, note = ? WHERE id = ?
+    else if (params.length >= 8) {
+      updatePayload.debtor_id = Number(params[0]);
+      updatePayload.job_date = params[1];
+      updatePayload.location = params[2];
+      updatePayload.description = params[3] || '';
+      updatePayload.wage = Number(params[4]) || 0;
+      updatePayload.advance_withdraw = Number(params[5]) || 0;
+      updatePayload.note = params[6] || '';
+    }
+    // Case 3: Wage / Advance update
+    else if (sql.includes('wage =')) {
+      updatePayload.wage = Number(params[0]) || 0;
+      if (params.length > 2) {
+        updatePayload.advance_withdraw = Number(params[1]) || 0;
+      }
+    }
+
+    const { error } = await client.from('jobs').update(updatePayload).eq('id', jobId);
     if (error) throw new Error(formatSupabaseError(error));
     return { changes: 1 };
   }
@@ -367,21 +418,35 @@ async function executeSupabaseRun(sql, params = []) {
   }
 
   if (upper.startsWith('DELETE FROM DEBT_TRANSACTIONS')) {
-    const debtorId = Number(params[0]);
-    if (isNaN(debtorId) || debtorId <= 0) {
+    const targetId = Number(params[0]);
+    if (isNaN(targetId) || targetId <= 0) {
       return { changes: 0 };
     }
-    const { error } = await client.from('debt_transactions').delete().eq('debtor_id', debtorId);
+    let query = client.from('debt_transactions').delete();
+    if (sql.includes('job_id =')) {
+      query = query.eq('job_id', targetId);
+    } else if (sql.includes('debtor_id =')) {
+      query = query.eq('debtor_id', targetId);
+    } else {
+      query = query.eq('id', targetId);
+    }
+    const { error } = await query;
     if (error) throw new Error(formatSupabaseError(error));
     return { changes: 1 };
   }
 
   if (upper.startsWith('DELETE FROM JOBS')) {
-    const jobId = Number(params[0]);
-    if (isNaN(jobId) || jobId <= 0) {
+    const targetId = Number(params[0]);
+    if (isNaN(targetId) || targetId <= 0) {
       throw new Error('รหัสรายการงานไม่ถูกต้อง');
     }
-    const { error } = await client.from('jobs').delete().eq('id', jobId);
+    let query = client.from('jobs').delete();
+    if (sql.includes('debtor_id =')) {
+      query = query.eq('debtor_id', targetId);
+    } else {
+      query = query.eq('id', targetId);
+    }
+    const { error } = await query;
     if (error) throw new Error(formatSupabaseError(error));
     return { changes: 1 };
   }

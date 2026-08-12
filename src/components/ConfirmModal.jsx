@@ -36,7 +36,11 @@ export const ConfirmModal = ({ isOpen, onClose, onConfirm, title, message, confi
           <button
             type="button"
             className="btn btn-danger"
-            onClick={onConfirm}
+            onClick={() => {
+              if (!loading && onConfirm) {
+                onConfirm();
+              }
+            }}
             disabled={loading}
             style={{ flex: 1 }}
           >

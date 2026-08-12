@@ -131,6 +131,7 @@ export const Debtors = ({ onSelectDebtor }) => {
       return;
     }
 
+    if (submitting) return;
     setSubmitting(true);
     try {
       const payload = {
@@ -168,9 +169,11 @@ export const Debtors = ({ onSelectDebtor }) => {
   };
 
   const handleDeleteDebtor = async () => {
-    if (!deletingDebtor || !deletingDebtor.id || isNaN(Number(deletingDebtor.id))) {
-      alert('ไม่พบรหัสไอดีลูกหนี้ที่ถูกต้อง กรุณารีเฟรชแล้วลองอีกครั้ง');
-      setDeletingDebtor(null);
+    if (!deletingDebtor || !deletingDebtor.id || isNaN(Number(deletingDebtor.id)) || submitting) {
+      if (!deletingDebtor || !deletingDebtor.id || isNaN(Number(deletingDebtor.id))) {
+        alert('ไม่พบรหัสไอดีลูกหนี้ที่ถูกต้อง กรุณารีเฟรชแล้วลองอีกครั้ง');
+        setDeletingDebtor(null);
+      }
       return;
     }
     setSubmitting(true);

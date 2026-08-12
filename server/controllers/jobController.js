@@ -76,7 +76,8 @@ export const previewJobDeduction = async (req, res) => {
   try {
     const { debtor_id, wage, advance_withdraw } = req.body;
     
-    if (!debtor_id) {
+    const numDebtorId = Number(debtor_id);
+    if (!debtor_id || isNaN(numDebtorId) || numDebtorId <= 0) {
       return res.status(400).json({ message: 'กรุณาเลือกลูกหนี้' });
     }
 
@@ -87,7 +88,7 @@ export const previewJobDeduction = async (req, res) => {
       LEFT JOIN jobs j ON d.id = j.debtor_id
       WHERE d.id = ?
       GROUP BY d.id
-    `, [debtor_id]);
+    `, [numDebtorId]);
 
     if (!debtor) {
       return res.status(404).json({ message: 'ไม่พบลูกหนี้' });
@@ -122,7 +123,8 @@ export const createJob = async (req, res) => {
   try {
     const { debtor_id, job_date, location, description, wage, advance_withdraw, note } = req.body;
 
-    if (!debtor_id || !job_date || !location || wage === undefined || wage === null) {
+    const numDebtorId = Number(debtor_id);
+    if (!debtor_id || isNaN(numDebtorId) || numDebtorId <= 0 || !job_date || !location || wage === undefined || wage === null) {
       return res.status(400).json({ message: 'กรุณากรอกข้อมูลลูกหนี้, วันที่จัดงาน, สถานที่จัดงาน และค่าแรงให้ครบถ้วน' });
     }
 
@@ -139,7 +141,7 @@ export const createJob = async (req, res) => {
       return res.status(400).json({ message: 'จำนวนเงินเบิกต้องไม่เกินจำนวนค่าแรง' });
     }
 
-    const debtor = await dbGet('SELECT id FROM debtors WHERE id = ?', [debtor_id]);
+    const debtor = await dbGet('SELECT id FROM debtors WHERE id = ?', [numDebtorId]);
     if (!debtor) {
       return res.status(404).json({ message: 'ไม่พบข้อมูลลูกหนี้' });
     }
@@ -148,17 +150,17 @@ export const createJob = async (req, res) => {
     const result = await dbRun(
       `INSERT INTO jobs (debtor_id, job_date, location, description, wage, advance_withdraw, debt_deduction, net_wage, note, created_by)
        VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?, ?)`,
-      [debtor_id, job_date, location.trim(), description ? description.trim() : '', numWage, numAdvance, note ? note.trim() : '', req.user.id]
+      [numDebtorId, job_date, location.trim(), description ? description.trim() : '', numWage, numAdvance, note ? note.trim() : '', req.user.id]
     );
 
     const jobId = result.lastID;
 
     // Trigger full atomic recalculation
-    const recalcResult = await recalculateDebtorHistory(debtor_id, req.user.id);
+    const recalcResult = await recalculateDebtorHistory(numDebtorId, req.user.id);
 
     await logAudit(req.user.id, req.user.username, 'CREATE_JOB', {
       jobId,
-      debtor_id,
+      debtor_id: numDebtorId,
       job_date,
       wage: numWage,
       advance: numAdvance
@@ -190,7 +192,10 @@ export const updateJob = async (req, res) => {
       return res.status(404).json({ message: 'ไม่พบรายการงานที่ต้องการแก้ไข' });
     }
 
-    const targetDebtorId = debtor_id || existing.debtor_id;
+    const targetDebtorId = Number(debtor_id || existing.debtor_id);
+    if (isNaN(targetDebtorId) || targetDebtorId <= 0) {
+      return res.status(400).json({ message: 'กรุณาเลือกลูกหนี้' });
+    }
     const numWage = Number(wage !== undefined ? wage : existing.wage);
     const numAdvance = Number(advance_withdraw !== undefined ? advance_withdraw : existing.advance_withdraw);
 

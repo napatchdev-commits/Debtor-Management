@@ -9,18 +9,24 @@ import { dbRun, dbGet, dbAll } from '../db.js';
  */
 export const recalculateDebtorHistory = async (debtorId, userId = null) => {
   try {
-    const debtor = await dbGet('SELECT * FROM debtors WHERE id = ?', [debtorId]);
+    const numDebtorId = Number(debtorId);
+    if (isNaN(numDebtorId) || numDebtorId <= 0) {
+      console.warn(`[recalculateDebtorHistory] Invalid debtorId: ${debtorId}`);
+      return null;
+    }
+
+    const debtor = await dbGet('SELECT * FROM debtors WHERE id = ?', [numDebtorId]);
     if (!debtor) {
       throw new Error(`Debtor with ID ${debtorId} not found`);
     }
 
     // Clear existing debt transactions for this debtor
-    await dbRun('DELETE FROM debt_transactions WHERE debtor_id = ?', [debtorId]);
+    await dbRun('DELETE FROM debt_transactions WHERE debtor_id = ?', [numDebtorId]);
 
     // Fetch all jobs for this debtor ordered chronologically by job_date and id
     const jobs = await dbAll(
       'SELECT * FROM jobs WHERE debtor_id = ? ORDER BY date(job_date) ASC, id ASC',
-      [debtorId]
+      [numDebtorId]
     );
 
     let currentDebt = Number(debtor.initial_debt) || 0;
@@ -56,7 +62,7 @@ export const recalculateDebtorHistory = async (debtorId, userId = null) => {
           `INSERT INTO debt_transactions 
            (debtor_id, job_id, transaction_date, deducted_amount, debt_before, debt_after, created_by)
            VALUES (?, ?, ?, ?, ?, ?, ?)`,
-          [debtorId, job.id, job.job_date, actualDeduction, debtBefore, currentDebt, userId || job.created_by]
+          [numDebtorId, job.id, job.job_date, actualDeduction, debtBefore, currentDebt, userId || job.created_by]
         );
       }
     }
@@ -66,7 +72,7 @@ export const recalculateDebtorHistory = async (debtorId, userId = null) => {
 
     await dbRun(
       'UPDATE debtors SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-      [newStatus, debtorId]
+      [newStatus, numDebtorId]
     );
 
     return {
