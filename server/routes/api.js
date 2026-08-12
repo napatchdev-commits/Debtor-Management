@@ -5,7 +5,7 @@ import { getJobs, previewJobDeduction, createJob, updateJob, deleteJob } from '.
 import { getMonthlySummary } from '../controllers/monthlyController.js';
 import { getDashboardStats } from '../controllers/dashboardController.js';
 import { getReportsData } from '../controllers/reportController.js';
-import { authenticateToken, requireAdmin } from '../middleware/auth.js';
+import { authenticateToken } from '../middleware/auth.js';
 
 const router = express.Router();
 
@@ -23,14 +23,14 @@ router.get('/debtors', authenticateToken, getDebtors);
 router.get('/debtors/:id', authenticateToken, getDebtorById);
 router.post('/debtors', authenticateToken, createDebtor);
 router.put('/debtors/:id', authenticateToken, updateDebtor);
-router.delete('/debtors/:id', authenticateToken, requireAdmin, deleteDebtor);
+router.delete('/debtors/:id', authenticateToken, deleteDebtor);
 
 // Jobs
 router.get('/jobs', authenticateToken, getJobs);
 router.post('/jobs/preview', authenticateToken, previewJobDeduction);
 router.post('/jobs', authenticateToken, createJob);
 router.put('/jobs/:id', authenticateToken, updateJob);
-router.delete('/jobs/:id', authenticateToken, requireAdmin, deleteJob);
+router.delete('/jobs/:id', authenticateToken, deleteJob);
 
 // Monthly Summary
 router.get('/monthly-summary', authenticateToken, getMonthlySummary);
