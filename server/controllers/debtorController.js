@@ -32,23 +32,18 @@ export const getDebtors = async (req, res) => {
 
     query += ' GROUP BY d.id ORDER BY d.created_at DESC';
 
-    const offset = (Number(page) - 1) * Number(limit);
-    query += ' LIMIT ? OFFSET ?';
-    params.push(Number(limit), offset);
-
     const debtors = await dbAll(query, params);
 
-    // Count query
-    let countQuery = 'SELECT COUNT(DISTINCT d.id) as total FROM debtors d';
-    if (conditions.length > 0) {
-      countQuery += ' WHERE ' + conditions.join(' AND ');
-    }
-    const totalRow = await dbGet(countQuery, params.slice(0, params.length - 2));
-
     res.json({
-      debtors,
+      debtors: (debtors || []).map(d => ({
+        ...d,
+        id: Number(d.id),
+        initial_debt: Number(d.initial_debt) || 0,
+        paid_amount: Number(d.paid_amount) || 0,
+        remaining_debt: Number(d.remaining_debt) || 0
+      })),
       pagination: {
-        total: totalRow ? totalRow.total : 0,
+        total: debtors.length,
         page: Number(page),
         limit: Number(limit)
       }
@@ -60,7 +55,11 @@ export const getDebtors = async (req, res) => {
 
 export const getDebtorById = async (req, res) => {
   try {
-    const { id } = req.params;
+    const debtorId = Number(req.params.id);
+    if (isNaN(debtorId) || debtorId <= 0) {
+      return res.status(400).json({ message: 'รหัสไอดีลูกหนี้ไม่ถูกต้อง' });
+    }
+
     const debtor = await dbGet(`
       SELECT d.*, 
         COALESCE(SUM(j.debt_deduction), 0) as paid_amount,
@@ -69,7 +68,7 @@ export const getDebtorById = async (req, res) => {
       LEFT JOIN jobs j ON d.id = j.debtor_id
       WHERE d.id = ?
       GROUP BY d.id
-    `, [id]);
+    `, [debtorId]);
 
     if (!debtor) {
       return res.status(404).json({ message: 'ไม่พบข้อมูลลูกหนี้' });
@@ -78,7 +77,7 @@ export const getDebtorById = async (req, res) => {
     // Jobs history
     const jobs = await dbAll(
       'SELECT j.*, u.name as creator_name FROM jobs j LEFT JOIN users u ON j.created_by = u.id WHERE j.debtor_id = ? ORDER BY date(j.job_date) DESC, j.id DESC',
-      [id]
+      [debtorId]
     );
 
     // Debt deduction transactions history
@@ -89,11 +88,17 @@ export const getDebtorById = async (req, res) => {
        LEFT JOIN users u ON t.created_by = u.id 
        WHERE t.debtor_id = ? 
        ORDER BY date(t.transaction_date) DESC, t.id DESC`,
-      [id]
+      [debtorId]
     );
 
     res.json({
-      debtor,
+      debtor: {
+        ...debtor,
+        id: Number(debtor.id),
+        initial_debt: Number(debtor.initial_debt) || 0,
+        paid_amount: Number(debtor.paid_amount) || 0,
+        remaining_debt: Number(debtor.remaining_debt) || 0
+      },
       jobs,
       transactions
     });
@@ -118,9 +123,8 @@ export const createDebtor = async (req, res) => {
     // Auto code generation if code is empty
     let debtorCode = code ? code.trim() : '';
     if (!debtorCode) {
-      const maxIdRow = await dbGet('SELECT MAX(id) as maxId FROM debtors');
-      const nextNum = (maxIdRow && maxIdRow.maxId ? maxIdRow.maxId : 0) + 1;
-      debtorCode = `DB-${String(nextNum).padStart(4, '0')}`;
+      const uniqueSuffix = String(Date.now()).slice(-4);
+      debtorCode = `DB-${uniqueSuffix}`;
     }
 
     // Check duplicate code
@@ -137,13 +141,24 @@ export const createDebtor = async (req, res) => {
       [debtorCode, name.trim(), phone ? phone.trim() : '', numInitialDebt, start_date, note ? note.trim() : '', initialStatus]
     );
 
-    await logAudit(req.user.id, req.user.username, 'CREATE_DEBTOR', { id: result.lastID, code: debtorCode, name, initial_debt: numInitialDebt });
+    const insertedId = Number(result.lastID);
 
-    const newDebtor = await dbGet('SELECT * FROM debtors WHERE id = ?', [result.lastID]);
+    await logAudit(req.user.id, req.user.username, 'CREATE_DEBTOR', { id: insertedId, code: debtorCode, name, initial_debt: numInitialDebt });
+
+    const newDebtor = await dbGet('SELECT * FROM debtors WHERE id = ?', [insertedId]);
+
     res.status(201).json({
       message: 'เพิ่มข้อมูลลูกหนี้เรียบร้อยแล้ว',
       debtor: {
-        ...newDebtor,
+        ...(newDebtor || {}),
+        id: insertedId,
+        code: debtorCode,
+        name: name.trim(),
+        phone: phone ? phone.trim() : '',
+        initial_debt: numInitialDebt,
+        start_date: start_date,
+        note: note ? note.trim() : '',
+        status: initialStatus,
         paid_amount: 0,
         remaining_debt: numInitialDebt
       }
@@ -155,10 +170,14 @@ export const createDebtor = async (req, res) => {
 
 export const updateDebtor = async (req, res) => {
   try {
-    const { id } = req.params;
+    const debtorId = Number(req.params.id);
+    if (isNaN(debtorId) || debtorId <= 0) {
+      return res.status(400).json({ message: 'รหัสไอดีลูกหนี้ไม่ถูกต้อง' });
+    }
+
     const { code, name, phone, initial_debt, start_date, note } = req.body;
 
-    const existing = await dbGet('SELECT * FROM debtors WHERE id = ?', [id]);
+    const existing = await dbGet('SELECT * FROM debtors WHERE id = ?', [debtorId]);
     if (!existing) {
       return res.status(404).json({ message: 'ไม่พบข้อมูลลูกหนี้' });
     }
@@ -174,7 +193,7 @@ export const updateDebtor = async (req, res) => {
 
     // Check code duplication if changed
     if (code && code.trim() !== existing.code) {
-      const codeCheck = await dbGet('SELECT id FROM debtors WHERE code = ? AND id != ?', [code.trim(), id]);
+      const codeCheck = await dbGet('SELECT id FROM debtors WHERE code = ? AND id != ?', [code.trim(), debtorId]);
       if (codeCheck) {
         return res.status(400).json({ message: `รหัสลูกหนี้ "${code.trim()}" มีในระบบแล้ว` });
       }
@@ -191,14 +210,14 @@ export const updateDebtor = async (req, res) => {
         numInitialDebt,
         start_date,
         note ? note.trim() : '',
-        id
+        debtorId
       ]
     );
 
     // Recalculate if initial debt changed
-    await recalculateDebtorHistory(id, req.user.id);
+    await recalculateDebtorHistory(debtorId, req.user.id);
 
-    await logAudit(req.user.id, req.user.username, 'UPDATE_DEBTOR', { id, code, name, numInitialDebt });
+    await logAudit(req.user.id, req.user.username, 'UPDATE_DEBTOR', { id: debtorId, code, name, numInitialDebt });
 
     const updated = await dbGet(`
       SELECT d.*, 
@@ -208,9 +227,15 @@ export const updateDebtor = async (req, res) => {
       LEFT JOIN jobs j ON d.id = j.debtor_id
       WHERE d.id = ?
       GROUP BY d.id
-    `, [id]);
+    `, [debtorId]);
 
-    res.json({ message: 'แก้ไขข้อมูลลูกหนี้เรียบร้อยแล้ว', debtor: updated });
+    res.json({
+      message: 'แก้ไขข้อมูลลูกหนี้เรียบร้อยแล้ว',
+      debtor: {
+        ...updated,
+        id: debtorId
+      }
+    });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -218,14 +243,18 @@ export const updateDebtor = async (req, res) => {
 
 export const deleteDebtor = async (req, res) => {
   try {
-    const { id } = req.params;
-    const existing = await dbGet('SELECT * FROM debtors WHERE id = ?', [id]);
+    const debtorId = Number(req.params.id);
+    if (isNaN(debtorId) || debtorId <= 0) {
+      return res.status(400).json({ message: 'รหัสไอดีลูกหนี้ไม่ถูกต้อง' });
+    }
+
+    const existing = await dbGet('SELECT * FROM debtors WHERE id = ?', [debtorId]);
     if (!existing) {
       return res.status(404).json({ message: 'ไม่พบข้อมูลลูกหนี้' });
     }
 
-    await dbRun('DELETE FROM debtors WHERE id = ?', [id]);
-    await logAudit(req.user.id, req.user.username, 'DELETE_DEBTOR', { id, code: existing.code, name: existing.name });
+    await dbRun('DELETE FROM debtors WHERE id = ?', [debtorId]);
+    await logAudit(req.user.id, req.user.username, 'DELETE_DEBTOR', { id: debtorId, code: existing.code, name: existing.name });
 
     res.json({ message: `ลบลูกหนี้ "${existing.name}" เรียบร้อยแล้ว` });
   } catch (err) {
