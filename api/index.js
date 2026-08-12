@@ -8,11 +8,16 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// API routes
+// Support both /api/auth/login and /auth/login routes on Vercel Serverless
 app.use('/api', apiRoutes);
+app.use('/', apiRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', environment: 'vercel-serverless', timestamp: new Date().toISOString() });
+});
+
+app.get('/health', (req, res) => {
   res.json({ status: 'ok', environment: 'vercel-serverless', timestamp: new Date().toISOString() });
 });
 
