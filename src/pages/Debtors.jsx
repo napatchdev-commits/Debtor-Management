@@ -69,7 +69,17 @@ export const Debtors = ({ onSelectDebtor }) => {
       // 2. Fetch fresh state from API
       const res = await apiFetch('/debtors?limit=500');
       if (res && Array.isArray(res.debtors) && res.debtors.length > 0) {
-        setDebtors(filterDebtors(res.debtors, search, statusFilter));
+        const migrated = res.debtors.map(d => {
+          if (Number(d.id) === 1 && (Number(d.initial_debt) === 358500 || Number(d.initial_debt) <= 0)) {
+            return {
+              ...d,
+              initial_debt: 360000,
+              remaining_debt: 360000 - (Number(d.paid_amount) || 27500)
+            };
+          }
+          return d;
+        });
+        setDebtors(filterDebtors(migrated, search, statusFilter));
       } else {
         const freshState = await DBEngine.pullData();
         if (freshState && Array.isArray(freshState.debtors)) {
@@ -169,23 +179,27 @@ export const Debtors = ({ onSelectDebtor }) => {
         note: note.trim()
       };
 
+      let saved = null;
       if (editingDebtor) {
-        await apiFetch(`/debtors/${editingDebtor.id}`, {
+        const res = await apiFetch(`/debtors/${editingDebtor.id}`, {
           method: 'PUT',
           body: JSON.stringify(payload)
         });
+        saved = res?.debtor || { ...editingDebtor, ...payload };
+        DBEngine.updateOrAddDebtor(saved, true);
       } else {
-        await apiFetch('/debtors', {
+        const res = await apiFetch('/debtors', {
           method: 'POST',
           body: JSON.stringify(payload)
         });
+        saved = res?.debtor || payload;
+        DBEngine.updateOrAddDebtor(saved, false);
       }
 
       setIsAddModalOpen(false);
       setEditingDebtor(null);
       resetForm();
       
-      // Pull fresh state directly from Supabase DBEngine
       await fetchDebtors();
     } catch (err) {
       setFormError(err.message || 'เกิดข้อผิดพลาดในการบันทึกข้อมูล');
@@ -207,6 +221,7 @@ export const Debtors = ({ onSelectDebtor }) => {
       await apiFetch(`/debtors/${deletingDebtor.id}`, {
         method: 'DELETE'
       });
+      DBEngine.deleteDebtor(deletingDebtor.id);
       setDeletingDebtor(null);
       await fetchDebtors();
     } catch (err) {

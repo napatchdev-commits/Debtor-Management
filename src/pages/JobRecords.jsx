@@ -248,16 +248,21 @@ export const JobRecords = ({ onSelectDebtor }) => {
         note: note.trim()
       };
 
+      let saved = null;
       if (editingJob) {
-        await apiFetch(`/jobs/${editingJob.id}`, {
+        const res = await apiFetch(`/jobs/${editingJob.id}`, {
           method: 'PUT',
           body: JSON.stringify(payload)
         });
+        saved = res?.job || { ...editingJob, ...payload };
+        DBEngine.updateOrAddJob(saved, true);
       } else {
-        await apiFetch('/jobs', {
+        const res = await apiFetch('/jobs', {
           method: 'POST',
           body: JSON.stringify(payload)
         });
+        saved = res?.job || payload;
+        DBEngine.updateOrAddJob(saved, false);
       }
 
       setIsAddModalOpen(false);
@@ -278,6 +283,7 @@ export const JobRecords = ({ onSelectDebtor }) => {
       await apiFetch(`/jobs/${deletingJob.id}`, {
         method: 'DELETE'
       });
+      DBEngine.deleteJob(deletingJob.id, deletingJob.debtor_id);
       setDeletingJob(null);
       await fetchJobs();
       await fetchDebtorsDropdown();

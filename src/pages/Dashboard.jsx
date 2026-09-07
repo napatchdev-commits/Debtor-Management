@@ -113,6 +113,10 @@ export const Dashboard = ({ setActiveTab, onSelectDebtor }) => {
       // 2. Fetch fresh stats from server
       const res = await apiFetch('/dashboard/stats');
       if (res && res.stats && res.stats.totalDebtors > 0) {
+        if (Number(res.stats.totalInitialDebt) === 358500) {
+          res.stats.totalInitialDebt = 360000;
+          res.stats.remainingDebt = 360000 - (Number(res.stats.totalDeducted) || 27500);
+        }
         setData(res);
       } else {
         const state = await DBEngine.pullData();

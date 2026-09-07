@@ -26,9 +26,9 @@ export const DEFAULT_SEED_STATE = {
       code: 'DB-001',
       name: 'นรรฐพล กาบแก้ว',
       phone: '081-234-5678',
-      initial_debt: 358500,
+      initial_debt: 360000,
       paid_amount: 27500,
-      remaining_debt: 331000,
+      remaining_debt: 332500,
       start_date: '2026-05-01',
       note: 'ลูกหนี้งานหักค่าแรงประจำ',
       status: 'active',
@@ -63,15 +63,15 @@ export const DEFAULT_SEED_STATE = {
   audit_logs: []
 };
 
-// Generate 21 Seed Debt Transactions for DB-001
+// Generate 21 Seed Debt Transactions for DB-001 (From Initial Debt 360,000)
 DEFAULT_SEED_STATE.debt_transactions = DEFAULT_SEED_STATE.jobs.map((j, idx) => ({
   id: idx + 1,
   debtor_id: 1,
   job_id: j.id,
   transaction_date: j.job_date,
   deducted_amount: j.debt_deduction,
-  debt_before: 358500 - (DEFAULT_SEED_STATE.jobs.slice(idx + 1).reduce((acc, curr) => acc + curr.debt_deduction, 0)),
-  debt_after: 358500 - (DEFAULT_SEED_STATE.jobs.slice(idx).reduce((acc, curr) => acc + curr.debt_deduction, 0)),
+  debt_before: 360000 - (DEFAULT_SEED_STATE.jobs.slice(idx + 1).reduce((acc, curr) => acc + curr.debt_deduction, 0)),
+  debt_after: 360000 - (DEFAULT_SEED_STATE.jobs.slice(idx).reduce((acc, curr) => acc + curr.debt_deduction, 0)),
   debtor_code: 'DB-001',
   debtor_name: 'นรรฐพล กาบแก้ว',
   job_location: j.location,
