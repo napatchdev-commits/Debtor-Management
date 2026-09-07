@@ -233,7 +233,7 @@ export const Debtors = ({ onSelectDebtor }) => {
         {loading && debtors.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>
             <RefreshCw size={24} className="spin" style={{ marginBottom: '0.5rem' }} />
-            <div>กำลังดึงข้อมูลลูกหนี้จาก Supabase...</div>
+            <div>กำลังดึงข้อมูลลูกหนี้...</div>
           </div>
         ) : error && debtors.length === 0 ? (
           <div style={{ padding: '2.5rem', textAlign: 'center' }}>
