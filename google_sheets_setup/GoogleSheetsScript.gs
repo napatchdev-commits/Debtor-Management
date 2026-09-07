@@ -2,16 +2,13 @@
  =========================================================================
  GOOGLE APPS SCRIPT FOR DEBTOR MANAGEMENT SYSTEM (GOOGLE SHEETS DATABASE 100%)
  =========================================================================
- Instructions:
- 1. Open your Google Spreadsheet on Google Drive (https://drive.google.com).
- 2. Click "Extensions" (ส่วนขยาย) -> "Apps Script".
- 3. Delete any default code in Code.gs, then COPY and PASTE this entire script.
- 4. Click Save (💾).
- 5. Click "Deploy" (ทำให้ใช้งานได้) -> "New deployment" (การทำให้ใช้งานได้ใหม่).
- 6. Select type: "Web app" (เว็บแอป).
- 7. Execute as: "Me" (ฉํน).
- 8. Who has access: "Anyone" (ทุกคน).
- 9. Click "Deploy" and copy the Web App URL (https://script.google.com/macros/s/.../exec).
+ 
+ 📌 วิธีใส่ข้อมูลลงชีตทันทีใน 10 วินาที:
+ 1. ในหน้าต่าง Apps Script นี้ ด้านบนจะมีช่องเลือกฟังก์ชัน (ข้างปุ่ม "เรียกใช้" หรือ "Run")
+ 2. เลือกฟังก์ชันชื่อ: "INITIALIZE_NOW"
+ 3. กดปุ่ม "เรียกใช้" (Run) 1 ครั้ง -> กดยอมรับสิทธิ์ (Review permissions -> Allow)
+ 4. กลับไปดูที่ Google Sheet ข้อมูลลูกหนี้และบันทึกงาน 21 รายการจะขึ้นในชีตทันที!
+ 
  =========================================================================
  */
 
@@ -24,10 +21,11 @@ const SCHEMAS = {
   audit_logs: ['id', 'user_id', 'username', 'action', 'details', 'created_at']
 };
 
-// Initial Seed Data (Original System Data)
+// Initial Seed Data (Original System Data from Excel)
 const INITIAL_SEED = {
   users: [
-    [1, 'admin', 'admin123', 'ผู้ดูแลระบบ', 'admin', '2026-05-01T00:00:00.000Z']
+    [1, 'admin', 'admin123', 'ผู้ดูแลระบบ', 'admin', '2026-05-01T00:00:00.000Z'],
+    [2, 'NaphatDev', 'admin123', 'NaphatDev', 'admin', '2026-05-01T00:00:00.000Z']
   ],
   debtors: [
     [1, 'DB-001', 'นรรฐพล กาบแก้ว', '081-234-5678', 358500, '2026-05-01', 'ลูกหนี้งานหักค่าแรงประจำ', 'active', '2026-05-01T00:00:00.000Z', '2026-09-03T00:00:00.000Z']
@@ -57,6 +55,18 @@ const INITIAL_SEED = {
   ]
 };
 
+/**
+ * 👉 ฟังก์ชันสร้างและใส่ข้อมูลลงชีตทันที (คลิกปุ่ม "เรียกใช้" / "Run" เพื่อรันฟังก์ชันนี้)
+ */
+function INITIALIZE_NOW() {
+  ensureTablesExist(true);
+  SpreadsheetApp.getActiveSpreadsheet().toast('สร้างตารางและบันทึกข้อมูลลูกหนี้เรียบร้อยแล้ว!', 'สำเร็จ', 5);
+}
+
+function onOpen() {
+  ensureTablesExist();
+}
+
 function doGet(e) {
   return handleRequest(e);
 }
@@ -70,7 +80,13 @@ function handleRequest(e) {
     ensureTablesExist();
 
     let contents = {};
-    if (e && e.postData && e.postData.contents) {
+    if (e && e.parameter && e.parameter.payload) {
+      try {
+        contents = JSON.parse(decodeURIComponent(e.parameter.payload));
+      } catch (err) {
+        try { contents = JSON.parse(e.parameter.payload); } catch (e2) {}
+      }
+    } else if (e && e.postData && e.postData.contents) {
       try {
         contents = JSON.parse(e.postData.contents);
       } catch (err) {
@@ -87,6 +103,14 @@ function handleRequest(e) {
       });
     }
 
+    if (action === 'push') {
+      const state = contents.state || {};
+      if (state.debtors && Array.isArray(state.debtors)) writeTableData('debtors', state.debtors);
+      if (state.jobs && Array.isArray(state.jobs)) writeTableData('jobs', state.jobs);
+      if (state.transactions && Array.isArray(state.transactions)) writeTableData('debt_transactions', state.transactions);
+      return jsonResponse({ status: 'ok', message: 'Data pushed to Google Sheets successfully', state: fetchFullState() });
+    }
+
     if (action === 'run') {
       const result = executeRun(contents);
       return jsonResponse({ status: 'ok', ...result });
@@ -98,6 +122,7 @@ function handleRequest(e) {
     }
 
     if (action === 'init') {
+      ensureTablesExist(true);
       return jsonResponse({ status: 'ok', message: 'Spreadsheet initialized successfully with seed data', state: fetchFullState() });
     }
 
@@ -112,7 +137,7 @@ function jsonResponse(data) {
     .setMimeType(ContentService.MimeType.JSON);
 }
 
-function ensureTablesExist() {
+function ensureTablesExist(forcePopulate) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   Object.keys(SCHEMAS).forEach(function(tableName) {
     let sheet = ss.getSheetByName(tableName);
@@ -120,11 +145,17 @@ function ensureTablesExist() {
       sheet = ss.insertSheet(tableName);
     }
     const headers = SCHEMAS[tableName];
-    if (sheet.getLastRow() === 0) {
+    const lastRow = sheet.getLastRow();
+
+    if (lastRow === 0) {
       sheet.appendRow(headers);
       sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#1e293b').setFontColor('#ffffff');
-      
-      // Populate initial seed data if table is empty
+    }
+
+    if (lastRow <= 1 || forcePopulate) {
+      if (forcePopulate && lastRow > 1) {
+        sheet.getRange(2, 1, lastRow - 1, headers.length).clearContent();
+      }
       if (INITIAL_SEED[tableName] && INITIAL_SEED[tableName].length > 0) {
         INITIAL_SEED[tableName].forEach(function(row) {
           sheet.appendRow(row);
@@ -133,11 +164,28 @@ function ensureTablesExist() {
     }
   });
 
-  // Remove default "Sheet1" or "แผ่น1" if other sheets exist
   const defaultSheet = ss.getSheetByName('Sheet1') || ss.getSheetByName('แผ่น1');
   if (defaultSheet && ss.getSheets().length > 1) {
     try { ss.deleteSheet(defaultSheet); } catch (e) {}
   }
+}
+
+function writeTableData(tableName, items) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(tableName);
+  if (!sheet) sheet = ss.insertSheet(tableName);
+
+  const headers = SCHEMAS[tableName];
+  sheet.clearContents();
+  sheet.appendRow(headers);
+  sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#1e293b').setFontColor('#ffffff');
+
+  items.forEach(function(item) {
+    const rowValues = headers.map(function(h) {
+      return item[h] !== undefined ? item[h] : '';
+    });
+    sheet.appendRow(rowValues);
+  });
 }
 
 function getSheetDataObjects(tableName) {

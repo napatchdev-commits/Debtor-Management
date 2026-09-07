@@ -38,6 +38,24 @@ export const Debtors = ({ onSelectDebtor }) => {
   const [note, setNote] = useState('');
   const [formError, setFormError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncNotice, setSyncNotice] = useState('');
+
+  const handleSyncGoogleSheets = async () => {
+    try {
+      setSyncing(true);
+      setSyncNotice('');
+      const currentState = DBEngine.getState();
+      await DBEngine.pushData(currentState);
+      setSyncNotice('ซิงก์ข้อมูลลูกหนี้และรายการงานทั้งหมดไปยัง Google Sheets สำเร็จ!');
+      setTimeout(() => setSyncNotice(''), 4000);
+    } catch (err) {
+      setSyncNotice('เกิดข้อผิดพลาดในการซิงก์: ' + (err.message || 'ไม่สามารถส่งข้อมูลได้'));
+      setTimeout(() => setSyncNotice(''), 5000);
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   const fetchDebtors = async () => {
     try {
@@ -197,11 +215,39 @@ export const Debtors = ({ onSelectDebtor }) => {
           <h1 className="page-title">ระบบจัดการลูกหนี้</h1>
           <p className="page-subtitle">เพิ่ม แก้ไข ค้นหา และติดตามยอดหนี้คงเหลือรายบุคคล</p>
         </div>
-        <button className="btn btn-primary" onClick={handleOpenAddModal}>
-          <Plus size={18} />
-          <span>เพิ่มลูกหนี้ใหม่</span>
-        </button>
+        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+          <button
+            className="btn btn-secondary"
+            onClick={handleSyncGoogleSheets}
+            disabled={syncing}
+            title="ส่งข้อมูลลูกหนี้และรายการงานทั้งหมดไปบันทึกลงใน Google Sheets ทันที"
+          >
+            <RefreshCw size={16} className={syncing ? 'spin' : ''} />
+            <span>{syncing ? 'กำลังส่งข้อมูลลงชีต...' : 'ซิงก์ลง Google Sheets'}</span>
+          </button>
+          <button className="btn btn-primary" onClick={handleOpenAddModal}>
+            <Plus size={18} />
+            <span>เพิ่มลูกหนี้ใหม่</span>
+          </button>
+        </div>
       </div>
+
+      {syncNotice && (
+        <div style={{
+          padding: '0.85rem 1.25rem',
+          borderRadius: '0.5rem',
+          background: syncNotice.includes('สำเร็จ') ? 'rgba(52, 211, 153, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+          border: `1px solid ${syncNotice.includes('สำเร็จ') ? 'rgba(52, 211, 153, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
+          color: syncNotice.includes('สำเร็จ') ? '#34d399' : '#f87171',
+          marginBottom: '1rem',
+          fontWeight: 500,
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.5rem'
+        }}>
+          <span>{syncNotice}</span>
+        </div>
+      )}
 
       {/* Filter and Search Bar */}
       <div className="card filter-bar">

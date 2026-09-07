@@ -87,15 +87,20 @@ export const dbExec = async () => {
 };
 
 // Google Sheets API Web App Client with Automatic Memory Fallback
-async function fetchFromGoogleSheets(payload) {
+export async function fetchFromGoogleSheets(payload) {
   if (!googleSheetsWebAppUrl) {
     return { status: 'ok', state: memoryState };
   }
   try {
-    const res = await fetch(googleSheetsWebAppUrl, {
+    const encodedPayload = encodeURIComponent(JSON.stringify(payload));
+    const separator = googleSheetsWebAppUrl.includes('?') ? '&' : '?';
+    const targetUrl = `${googleSheetsWebAppUrl}${separator}action=${payload.action || 'pull'}&payload=${encodedPayload}`;
+
+    const res = await fetch(targetUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload),
+      redirect: 'follow'
     });
     const json = await res.json();
     if (json.status === 'error') {

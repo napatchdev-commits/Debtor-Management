@@ -1,4 +1,4 @@
-import { dbAll, dbRun } from '../db.js';
+import { dbAll, dbRun, fetchFromGoogleSheets, isGoogleSheetsConfigured } from '../db.js';
 import { recalculateDebtorHistory } from '../services/recalculateService.js';
 
 export const pullState = async (req, res) => {
@@ -27,7 +27,7 @@ export const pullState = async (req, res) => {
     const debtors = rawDebtors.map(d => {
       const id = Number(d.id);
       const initial_debt = Number(d.initial_debt) || 0;
-      const paid_amount = paidMap[id] || 0;
+      const paid_amount = paidMap[id] !== undefined ? paidMap[id] : (Number(d.paid_amount) || 0);
       const remaining_debt = Math.max(0, initial_debt - paid_amount);
       const status = (remaining_debt <= 0 && initial_debt > 0) ? 'paid_in_full' : (d.status || 'active');
 
@@ -75,6 +75,11 @@ export const pushState = async (req, res) => {
     const { state } = req.body;
     if (!state) {
       return res.status(400).json({ message: 'ไม่พบข้อมูล state ในการบันทึก' });
+    }
+
+    // Direct push to Google Sheets Web App
+    if (isGoogleSheetsConfigured) {
+      await fetchFromGoogleSheets({ action: 'push', state });
     }
 
     if (Array.isArray(state.debtors)) {
