@@ -8,22 +8,125 @@ import {
   ArrowRight, 
   Briefcase, 
   Database,
-  Plus
+  Plus,
+  FileSpreadsheet
 } from 'lucide-react';
 import { apiFetch, formatCurrency, formatDate } from '../services/api';
+import { DBEngine } from '../services/dbEngine';
+import { GoogleSheetsModal } from '../components/GoogleSheetsModal';
 
 export const Dashboard = ({ setActiveTab, onSelectDebtor }) => {
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState(() => {
+    // Instant initial calculation before first paint
+    try {
+      const initial = DBEngine.getState();
+      if (initial && Array.isArray(initial.debtors) && initial.debtors.length > 0) {
+        const debtors = initial.debtors || [];
+        const jobs = initial.jobs || [];
+        const transactions = initial.transactions || [];
+        const now = new Date();
+        const currentYearMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+        const totalDebtors = debtors.length;
+        const totalInitialDebt = debtors.reduce((sum, d) => sum + (Number(d.initial_debt) || 0), 0);
+        const totalDeducted = jobs.reduce((sum, j) => sum + (Number(j.debt_deduction) || 0), 0);
+        const remainingDebt = Math.max(0, totalInitialDebt - totalDeducted);
+        const currentMonthJobs = jobs.filter(j => j.job_date && String(j.job_date).startsWith(currentYearMonth));
+        const currentMonthWage = currentMonthJobs.reduce((sum, j) => sum + (Number(j.wage) || 0), 0);
+        const currentMonthAdvance = currentMonthJobs.reduce((sum, j) => sum + (Number(j.advance_withdraw) || 0), 0);
+        const currentMonthDeduction = currentMonthJobs.reduce((sum, j) => sum + (Number(j.debt_deduction) || 0), 0);
+        const paidInFullCount = debtors.filter(d => (Number(d.remaining_debt) <= 0 && Number(d.initial_debt) > 0) || d.status === 'paid_in_full').length;
+        const activeDebtorsCount = Math.max(0, totalDebtors - paidInFullCount);
+        return {
+          stats: {
+            totalDebtors,
+            activeDebtorsCount,
+            paidInFullCount,
+            totalInitialDebt,
+            totalDeducted,
+            remainingDebt,
+            currentMonth: {
+              yearMonth: currentYearMonth,
+              wage: currentMonthWage,
+              advance: currentMonthAdvance,
+              deduction: currentMonthDeduction
+            }
+          },
+          recentTransactions: transactions.slice(0, 5)
+        };
+      }
+    } catch (e) {}
+    return null;
+  });
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [isSheetsModalOpen, setIsSheetsModalOpen] = useState(false);
+
+  const calculateDashboardFromState = (state) => {
+    const debtors = state.debtors || [];
+    const jobs = state.jobs || [];
+    const transactions = state.transactions || [];
+
+    const now = new Date();
+    const currentYearMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+
+    const totalDebtors = debtors.length;
+    const totalInitialDebt = debtors.reduce((sum, d) => sum + (Number(d.initial_debt) || 0), 0);
+    const totalDeducted = jobs.reduce((sum, j) => sum + (Number(j.debt_deduction) || 0), 0);
+    const remainingDebt = Math.max(0, totalInitialDebt - totalDeducted);
+
+    const currentMonthJobs = jobs.filter(j => j.job_date && String(j.job_date).startsWith(currentYearMonth));
+    const currentMonthWage = currentMonthJobs.reduce((sum, j) => sum + (Number(j.wage) || 0), 0);
+    const currentMonthAdvance = currentMonthJobs.reduce((sum, j) => sum + (Number(j.advance_withdraw) || 0), 0);
+    const currentMonthDeduction = currentMonthJobs.reduce((sum, j) => sum + (Number(j.debt_deduction) || 0), 0);
+
+    const paidInFullCount = debtors.filter(d => (Number(d.remaining_debt) <= 0 && Number(d.initial_debt) > 0) || d.status === 'paid_in_full').length;
+    const activeDebtorsCount = Math.max(0, totalDebtors - paidInFullCount);
+
+    return {
+      stats: {
+        totalDebtors,
+        activeDebtorsCount,
+        paidInFullCount,
+        totalInitialDebt,
+        totalDeducted,
+        remainingDebt,
+        currentMonth: {
+          yearMonth: currentYearMonth,
+          wage: currentMonthWage,
+          advance: currentMonthAdvance,
+          deduction: currentMonthDeduction
+        }
+      },
+      recentTransactions: transactions.slice(0, 5)
+    };
+  };
 
   const fetchDashboard = async () => {
     try {
       setLoading(true);
+      // 1. Instant calculation from local state (0ms)
+      const localState = DBEngine.getState();
+      if (localState && Array.isArray(localState.debtors) && localState.debtors.length > 0) {
+        setData(calculateDashboardFromState(localState));
+      }
+
+      // 2. Fetch fresh stats from server
       const res = await apiFetch('/dashboard/stats');
-      setData(res);
+      if (res && res.stats && res.stats.totalDebtors > 0) {
+        setData(res);
+      } else {
+        const state = await DBEngine.pullData();
+        if (state && Array.isArray(state.debtors) && state.debtors.length > 0) {
+          setData(calculateDashboardFromState(state));
+        }
+      }
     } catch (err) {
-      setError(err.message || 'ไม่สามารถโหลดข้อมูล Dashboard ได้');
+      const localState = DBEngine.getState();
+      if (localState && Array.isArray(localState.debtors) && localState.debtors.length > 0) {
+        setData(calculateDashboardFromState(localState));
+      } else {
+        setError(err.message || 'ไม่สามารถโหลดข้อมูล Dashboard ได้');
+      }
     } finally {
       setLoading(false);
     }
@@ -33,7 +136,7 @@ export const Dashboard = ({ setActiveTab, onSelectDebtor }) => {
     fetchDashboard();
   }, []);
 
-  if (loading) {
+  if (loading && !data) {
     return (
       <div style={{ textAlign: 'center', padding: '4rem 0', color: 'var(--text-muted)' }}>
         กำลังโหลดข้อมูล Dashboard...
@@ -41,7 +144,7 @@ export const Dashboard = ({ setActiveTab, onSelectDebtor }) => {
     );
   }
 
-  if (error) {
+  if (error && !data) {
     return (
       <div className="card" style={{ borderLeft: '4px solid var(--accent-rose)', color: '#f87171' }}>
         {error}
@@ -59,7 +162,21 @@ export const Dashboard = ({ setActiveTab, onSelectDebtor }) => {
           <h1 className="page-title">Dashboard สรุปภาพรวม</h1>
           <p className="page-subtitle">แสดงข้อมูลสถิติจริงจากฐานข้อมูลเรียลไทม์</p>
         </div>
-        <div style={{ display: 'flex', gap: '0.75rem' }}>
+        <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+          <button
+            className="btn btn-secondary"
+            onClick={() => setIsSheetsModalOpen(true)}
+            style={{ 
+              color: '#4ade80', 
+              borderColor: 'rgba(34, 197, 94, 0.4)', 
+              background: 'rgba(34, 197, 94, 0.12)',
+              fontWeight: 500
+            }}
+            title="ตั้งค่าและซิงก์ข้อมูลไปยัง Google Sheets"
+          >
+            <FileSpreadsheet size={16} />
+            <span>ซิงก์ Google Sheets</span>
+          </button>
           <button className="btn btn-primary" onClick={() => setActiveTab('debtors')}>
             <Plus size={16} />
             <span>เพิ่มลูกหนี้</span>
@@ -260,6 +377,13 @@ export const Dashboard = ({ setActiveTab, onSelectDebtor }) => {
           </div>
         )}
       </div>
+
+      {/* Google Sheets Modal */}
+      <GoogleSheetsModal
+        isOpen={isSheetsModalOpen}
+        onClose={() => setIsSheetsModalOpen(false)}
+        onSyncComplete={fetchDashboard}
+      />
     </div>
   );
 };

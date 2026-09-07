@@ -1,8 +1,50 @@
-import { dbAll, dbRun, fetchFromGoogleSheets, isGoogleSheetsConfigured } from '../db.js';
+import { dbAll, dbRun, fetchFromGoogleSheets, getIsGoogleSheetsConfigured, getGoogleSheetsUrl, setGoogleSheetsUrl, memoryState } from '../db.js';
 import { recalculateDebtorHistory } from '../services/recalculateService.js';
+
+export const getSyncConfig = (req, res) => {
+  const url = getGoogleSheetsUrl();
+  res.json({
+    configured: getIsGoogleSheetsConfigured(),
+    url: url || ''
+  });
+};
+
+export const updateSyncConfig = async (req, res) => {
+  const { url } = req.body;
+  if (url !== undefined) {
+    setGoogleSheetsUrl(url);
+  }
+  res.json({
+    configured: getIsGoogleSheetsConfigured(),
+    url: getGoogleSheetsUrl(),
+    message: 'อัปเดตการตั้งค่า Google Sheets สำเร็จ'
+  });
+};
 
 export const pullState = async (req, res) => {
   try {
+    if (getIsGoogleSheetsConfigured()) {
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 4000);
+        const gsRes = await fetchFromGoogleSheets({ action: 'pull' }, controller.signal);
+        clearTimeout(timer);
+        if (gsRes && gsRes.state) {
+          if (Array.isArray(gsRes.state.debtors) && gsRes.state.debtors.length > 0) {
+            memoryState.debtors = gsRes.state.debtors;
+          }
+          if (Array.isArray(gsRes.state.jobs) && gsRes.state.jobs.length > 0) {
+            memoryState.jobs = gsRes.state.jobs;
+          }
+          if (Array.isArray(gsRes.state.transactions) && gsRes.state.transactions.length > 0) {
+            memoryState.debt_transactions = gsRes.state.transactions;
+          }
+        }
+      } catch (e) {
+        console.warn('Google Sheets pull notice:', e.message);
+      }
+    }
+
     const rawDebtors = (await dbAll('SELECT * FROM debtors')) || [];
     const rawJobs = (await dbAll('SELECT * FROM jobs')) || [];
     const rawTx = (await dbAll('SELECT * FROM debt_transactions')) || [];
@@ -72,7 +114,11 @@ export const pullState = async (req, res) => {
 
 export const pushState = async (req, res) => {
   try {
-    const { state } = req.body;
+    const { state, googleSheetsUrl } = req.body;
+    if (googleSheetsUrl) {
+      setGoogleSheetsUrl(googleSheetsUrl);
+    }
+
     if (!state) {
       return res.status(400).json({ message: 'ไม่พบข้อมูล state ในการบันทึก' });
     }
@@ -115,7 +161,7 @@ export const pushState = async (req, res) => {
     }
 
     // Direct single batch sync to Google Sheets (One fast HTTP call)
-    if (isGoogleSheetsConfigured) {
+    if (getIsGoogleSheetsConfigured()) {
       const finalDebtors = (await dbAll('SELECT * FROM debtors')) || [];
       const finalJobs = (await dbAll('SELECT * FROM jobs')) || [];
       const finalTx = (await dbAll('SELECT * FROM debt_transactions')) || [];

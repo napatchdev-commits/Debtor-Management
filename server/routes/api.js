@@ -5,7 +5,7 @@ import { getJobs, previewJobDeduction, createJob, updateJob, deleteJob } from '.
 import { getMonthlySummary } from '../controllers/monthlyController.js';
 import { getDashboardStats } from '../controllers/dashboardController.js';
 import { getReportsData } from '../controllers/reportController.js';
-import { pullState, pushState } from '../controllers/syncController.js';
+import { pullState, pushState, getSyncConfig, updateSyncConfig } from '../controllers/syncController.js';
 import { authenticateToken } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -19,6 +19,8 @@ router.get('/auth/me', authenticateToken, getMe);
 // Sync State Engine (Sombat Apartment Innovation Architecture)
 router.get('/sync/pull', authenticateToken, pullState);
 router.post('/sync/push', authenticateToken, pushState);
+router.get('/sync/config', authenticateToken, getSyncConfig);
+router.post('/sync/config', authenticateToken, updateSyncConfig);
 
 // Dashboard
 router.get('/dashboard/stats', authenticateToken, getDashboardStats);

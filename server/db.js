@@ -63,8 +63,37 @@ export const DEFAULT_SEED_STATE = {
   audit_logs: []
 };
 
+// Generate 21 Seed Debt Transactions for DB-001
+DEFAULT_SEED_STATE.debt_transactions = DEFAULT_SEED_STATE.jobs.map((j, idx) => ({
+  id: idx + 1,
+  debtor_id: 1,
+  job_id: j.id,
+  transaction_date: j.job_date,
+  deducted_amount: j.debt_deduction,
+  debt_before: 358500 - (DEFAULT_SEED_STATE.jobs.slice(idx + 1).reduce((acc, curr) => acc + curr.debt_deduction, 0)),
+  debt_after: 358500 - (DEFAULT_SEED_STATE.jobs.slice(idx).reduce((acc, curr) => acc + curr.debt_deduction, 0)),
+  debtor_code: 'DB-001',
+  debtor_name: 'นรรฐพล กาบแก้ว',
+  job_location: j.location,
+  created_at: j.job_date + 'T00:00:00.000Z'
+}));
+
 // In-Memory Database State with Seed Fallback (Ultra Fast: 0ms operations)
 export let memoryState = JSON.parse(JSON.stringify(DEFAULT_SEED_STATE));
+
+export let runtimeGoogleSheetsUrl = googleSheetsWebAppUrl;
+
+export function setGoogleSheetsUrl(url) {
+  runtimeGoogleSheetsUrl = (url || '').trim();
+}
+
+export function getGoogleSheetsUrl() {
+  return runtimeGoogleSheetsUrl;
+}
+
+export function getIsGoogleSheetsConfigured() {
+  return Boolean(runtimeGoogleSheetsUrl && runtimeGoogleSheetsUrl.startsWith('http'));
+}
 
 // Pure High-Speed Database Abstraction Layer
 export const dbRun = async (sql, params = []) => {
@@ -85,20 +114,22 @@ export const dbExec = async () => {
 };
 
 // Single Batch Sync Client for Google Sheets
-export async function fetchFromGoogleSheets(payload) {
-  if (!googleSheetsWebAppUrl) {
+export async function fetchFromGoogleSheets(payload, signal) {
+  const targetUrlStr = runtimeGoogleSheetsUrl || googleSheetsWebAppUrl;
+  if (!targetUrlStr) {
     return { status: 'ok', state: memoryState };
   }
   try {
     const encodedPayload = encodeURIComponent(JSON.stringify(payload));
-    const separator = googleSheetsWebAppUrl.includes('?') ? '&' : '?';
-    const targetUrl = `${googleSheetsWebAppUrl}${separator}action=${payload.action || 'pull'}&payload=${encodedPayload}`;
+    const separator = targetUrlStr.includes('?') ? '&' : '?';
+    const targetUrl = `${targetUrlStr}${separator}action=${payload.action || 'pull'}&payload=${encodedPayload}`;
 
     const res = await fetch(targetUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
-      redirect: 'follow'
+      redirect: 'follow',
+      signal
     });
     const json = await res.json();
     if (json.status === 'error') {
@@ -124,7 +155,7 @@ function executeLocalSelect(sql, params = []) {
   let rows = memoryState[table] || [];
 
   if (table === 'users') {
-    if (upper.includes('COUNT(')) {
+    if (upper.trim().startsWith('SELECT COUNT')) {
       return [{ count: rows.length }];
     }
     if (sql.includes('WHERE username =') && params[0]) {
@@ -135,7 +166,7 @@ function executeLocalSelect(sql, params = []) {
   }
 
   if (table === 'debtors') {
-    if (upper.includes('COUNT(')) {
+    if (upper.trim().startsWith('SELECT COUNT')) {
       let filtered = rows;
       if (sql.includes('WHERE d.status =') || sql.includes('WHERE status =')) {
         if (params.length > 0 && params[0]) filtered = filtered.filter(d => String(d.status).trim() === String(params[0]).trim());
@@ -190,7 +221,7 @@ function executeLocalSelect(sql, params = []) {
   }
 
   if (table === 'jobs') {
-    if (upper.includes('COUNT(')) {
+    if (upper.trim().startsWith('SELECT COUNT')) {
       return [{ count: rows.length, total: rows.length }];
     }
 

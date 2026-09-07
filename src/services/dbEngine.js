@@ -131,21 +131,53 @@ export class DBEngine {
     return this.pullData(force);
   }
 
+  static getGoogleSheetsUrl() {
+    return localStorage.getItem('GOOGLE_SHEETS_WEBAPP_URL') || '';
+  }
+
+  static setGoogleSheetsUrl(url) {
+    if (url) {
+      localStorage.setItem('GOOGLE_SHEETS_WEBAPP_URL', url.trim());
+    } else {
+      localStorage.removeItem('GOOGLE_SHEETS_WEBAPP_URL');
+    }
+  }
+
   static async pushData(state) {
     this.saveStateLocally(state);
+    const gsUrl = this.getGoogleSheetsUrl();
+
+    // 1. Send via Backend Serverless API
     try {
       const res = await apiFetch('/sync/push', {
         method: 'POST',
-        body: JSON.stringify({ state })
+        body: JSON.stringify({ state, googleSheetsUrl: gsUrl })
       });
       if (res && res.state) {
         this.saveStateLocally(res.state);
-        return res.state;
       }
     } catch (err) {
-      console.warn('[DBEngine] Sync push error:', err);
+      console.warn('[DBEngine] Backend sync push notice:', err);
     }
-    return state;
+
+    // 2. Direct browser sync to Google Apps Script Web App (Avoids CORS preflight via text/plain)
+    if (gsUrl && gsUrl.startsWith('http')) {
+      try {
+        const separator = gsUrl.includes('?') ? '&' : '?';
+        const targetUrl = `${gsUrl}${separator}action=push`;
+        await fetch(targetUrl, {
+          method: 'POST',
+          mode: 'no-cors',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({ action: 'push', state })
+        });
+        console.log('[DBEngine] Direct Google Sheets push sent successfully.');
+      } catch (directErr) {
+        console.warn('[DBEngine] Direct Google Sheets push error:', directErr);
+      }
+    }
+
+    return this.getState();
   }
 
   static async pushToSupabase(state) {

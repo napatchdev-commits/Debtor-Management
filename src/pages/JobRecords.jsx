@@ -19,9 +19,23 @@ import { Modal } from '../components/Modal';
 import { ConfirmModal } from '../components/ConfirmModal';
 
 export const JobRecords = ({ onSelectDebtor }) => {
-  const [jobs, setJobs] = useState([]);
-  const [debtorsList, setDebtorsList] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [jobs, setJobs] = useState(() => {
+    try {
+      const state = DBEngine.getState();
+      return state && Array.isArray(state.jobs) ? state.jobs : [];
+    } catch (e) {
+      return [];
+    }
+  });
+  const [debtorsList, setDebtorsList] = useState(() => {
+    try {
+      const state = DBEngine.getState();
+      return state && Array.isArray(state.debtors) ? state.debtors : [];
+    } catch (e) {
+      return [];
+    }
+  });
+  const [loading, setLoading] = useState(false);
 
   // Filter states
   const [search, setSearch] = useState('');
@@ -50,32 +64,42 @@ export const JobRecords = ({ onSelectDebtor }) => {
   const [calcPreview, setCalcPreview] = useState(null);
   const [previewLoading, setPreviewLoading] = useState(false);
 
+  const applyFilters = (rawJobs) => {
+    let jobList = rawJobs || [];
+    if (search && search.trim()) {
+      const term = search.trim().toLowerCase();
+      jobList = jobList.filter(j => 
+        (j.location && j.location.toLowerCase().includes(term)) ||
+        (j.description && j.description.toLowerCase().includes(term)) ||
+        (j.debtor_name && j.debtor_name.toLowerCase().includes(term))
+      );
+    }
+    if (debtorFilter) {
+      jobList = jobList.filter(j => Number(j.debtor_id) === Number(debtorFilter));
+    }
+    if (selectedYear) {
+      jobList = jobList.filter(j => j.job_date && j.job_date.startsWith(selectedYear));
+    }
+    if (selectedMonth) {
+      const monthStr = String(selectedMonth).padStart(2, '0');
+      jobList = jobList.filter(j => j.job_date && j.job_date.slice(5, 7) === monthStr);
+    }
+    return jobList;
+  };
+
   const fetchJobs = async () => {
     try {
-      setLoading(true);
-      const state = await DBEngine.pullFromSupabase();
-      let jobList = state && Array.isArray(state.jobs) ? state.jobs : [];
-
-      if (search && search.trim()) {
-        const term = search.trim().toLowerCase();
-        jobList = jobList.filter(j => 
-          (j.location && j.location.toLowerCase().includes(term)) ||
-          (j.description && j.description.toLowerCase().includes(term)) ||
-          (j.debtor_name && j.debtor_name.toLowerCase().includes(term))
-        );
-      }
-      if (debtorFilter) {
-        jobList = jobList.filter(j => Number(j.debtor_id) === Number(debtorFilter));
-      }
-      if (selectedYear) {
-        jobList = jobList.filter(j => j.job_date && j.job_date.startsWith(selectedYear));
-      }
-      if (selectedMonth) {
-        const monthStr = String(selectedMonth).padStart(2, '0');
-        jobList = jobList.filter(j => j.job_date && j.job_date.slice(5, 7) === monthStr);
+      // 1. Instant local load (0ms)
+      const localState = DBEngine.getState();
+      if (localState && Array.isArray(localState.jobs)) {
+        setJobs(applyFilters(localState.jobs));
       }
 
-      setJobs(jobList);
+      // 2. Fresh pull from backend
+      const state = await DBEngine.pullData();
+      if (state && Array.isArray(state.jobs)) {
+        setJobs(applyFilters(state.jobs));
+      }
     } catch (err) {
       console.error('Failed to fetch jobs:', err);
     } finally {

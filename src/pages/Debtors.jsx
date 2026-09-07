@@ -10,22 +10,32 @@ import {
   Calendar, 
   FileText,
   AlertCircle,
-  RefreshCw
+  RefreshCw,
+  FileSpreadsheet
 } from 'lucide-react';
 import { apiFetch, formatCurrency, formatDate } from '../services/api';
 import { DBEngine } from '../services/dbEngine';
 import { Modal } from '../components/Modal';
 import { ConfirmModal } from '../components/ConfirmModal';
+import { GoogleSheetsModal } from '../components/GoogleSheetsModal';
 
 export const Debtors = ({ onSelectDebtor }) => {
-  const [debtors, setDebtors] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [debtors, setDebtors] = useState(() => {
+    try {
+      const initial = DBEngine.getState();
+      return initial && Array.isArray(initial.debtors) ? initial.debtors : [];
+    } catch (e) {
+      return [];
+    }
+  });
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
 
   // Modal states
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isSheetsModalOpen, setIsSheetsModalOpen] = useState(false);
   const [editingDebtor, setEditingDebtor] = useState(null);
   const [deletingDebtor, setDeletingDebtor] = useState(null);
 
@@ -42,19 +52,7 @@ export const Debtors = ({ onSelectDebtor }) => {
   const [syncNotice, setSyncNotice] = useState('');
 
   const handleSyncGoogleSheets = async () => {
-    try {
-      setSyncing(true);
-      setSyncNotice('');
-      const currentState = DBEngine.getState();
-      await DBEngine.pushData(currentState);
-      setSyncNotice('ซิงก์ข้อมูลลูกหนี้และรายการงานทั้งหมดไปยัง Google Sheets สำเร็จ!');
-      setTimeout(() => setSyncNotice(''), 4000);
-    } catch (err) {
-      setSyncNotice('เกิดข้อผิดพลาดในการซิงก์: ' + (err.message || 'ไม่สามารถส่งข้อมูลได้'));
-      setTimeout(() => setSyncNotice(''), 5000);
-    } finally {
-      setSyncing(false);
-    }
+    setIsSheetsModalOpen(true);
   };
 
   const fetchDebtors = async () => {
@@ -62,20 +60,30 @@ export const Debtors = ({ onSelectDebtor }) => {
       setLoading(true);
       setError(null);
 
-      // Instant local cache load first (Sombat Apartment Innovation)
+      // 1. Instant local cache load first (0ms)
       const localState = DBEngine.getState();
       if (localState && Array.isArray(localState.debtors) && localState.debtors.length > 0) {
         setDebtors(filterDebtors(localState.debtors, search, statusFilter));
       }
 
-      // Sync fresh state from Supabase Cloud Engine
-      const freshState = await DBEngine.pullFromSupabase();
-      if (freshState && Array.isArray(freshState.debtors)) {
-        setDebtors(filterDebtors(freshState.debtors, search, statusFilter));
+      // 2. Fetch fresh state from API
+      const res = await apiFetch('/debtors?limit=500');
+      if (res && Array.isArray(res.debtors) && res.debtors.length > 0) {
+        setDebtors(filterDebtors(res.debtors, search, statusFilter));
+      } else {
+        const freshState = await DBEngine.pullData();
+        if (freshState && Array.isArray(freshState.debtors)) {
+          setDebtors(filterDebtors(freshState.debtors, search, statusFilter));
+        }
       }
     } catch (err) {
-      console.error('[Debtors] Sync error:', err);
-      setError(err.message || 'เกิดข้อผิดพลาดในการดึงข้อมูลลูกหนี้จากฐานข้อมูล');
+      console.error('[Debtors] Sync notice:', err);
+      const localState = DBEngine.getState();
+      if (localState && Array.isArray(localState.debtors) && localState.debtors.length > 0) {
+        setDebtors(filterDebtors(localState.debtors, search, statusFilter));
+      } else {
+        setError(err.message || 'เกิดข้อผิดพลาดในการดึงข้อมูลลูกหนี้');
+      }
     } finally {
       setLoading(false);
     }
@@ -539,6 +547,13 @@ export const Debtors = ({ onSelectDebtor }) => {
         title="ยืนยันการลบลูกหนี้"
         message={`คุณต้องการลบข้อมูลลูกหนี้ "${deletingDebtor?.code || ''} - ${deletingDebtor?.name || ''}" ใช่หรือไม่? รายการงานและประวัติธุรกรรมทั้งหมดของลูกหนี้นี้จะถูกลบออกอย่างสมบูรณ์`}
         loading={submitting}
+      />
+
+      {/* Google Sheets Modal */}
+      <GoogleSheetsModal
+        isOpen={isSheetsModalOpen}
+        onClose={() => setIsSheetsModalOpen(false)}
+        onSyncComplete={fetchDebtors}
       />
     </div>
   );

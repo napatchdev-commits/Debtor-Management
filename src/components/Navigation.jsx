@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { 
   LayoutDashboard, 
   Users, 
@@ -7,12 +7,15 @@ import {
   FileSpreadsheet, 
   LogOut,
   UserCheck,
-  CreditCard
+  CreditCard,
+  RefreshCw
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { GoogleSheetsModal } from './GoogleSheetsModal';
 
 export const Navigation = ({ activeTab, setActiveTab, selectedDebtorId, setSelectedDebtorId }) => {
   const { user, logout } = useAuth();
+  const [isSheetsModalOpen, setIsSheetsModalOpen] = useState(false);
 
   const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -57,6 +60,24 @@ export const Navigation = ({ activeTab, setActiveTab, selectedDebtorId, setSelec
         </nav>
 
         <div style={{ marginTop: 'auto', paddingTop: '1rem', borderTop: '1px solid var(--border-color)' }}>
+          <button
+            onClick={() => setIsSheetsModalOpen(true)}
+            className="btn btn-secondary"
+            style={{ 
+              width: '100%', 
+              marginBottom: '0.75rem', 
+              justifyContent: 'flex-start', 
+              background: 'rgba(34, 197, 94, 0.12)', 
+              color: '#4ade80', 
+              borderColor: 'rgba(34, 197, 94, 0.3)',
+              fontWeight: 500
+            }}
+            title="ตั้งค่าและซิงก์ข้อมูลไปยัง Google Sheets"
+          >
+            <FileSpreadsheet size={16} />
+            <span>เชื่อมต่อ Google Sheets</span>
+          </button>
+
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.75rem', padding: '0 0.5rem' }}>
             <div style={{ width: '36px', height: '36px', borderRadius: '50%', background: 'var(--bg-input)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--accent-primary)' }}>
               <UserCheck size={18} />
@@ -92,14 +113,24 @@ export const Navigation = ({ activeTab, setActiveTab, selectedDebtorId, setSelec
             {navItems.find(i => i.id === activeTab)?.label || 'ระบบลูกหนี้'}
           </span>
         </div>
-        <button
-          onClick={logout}
-          className="btn btn-secondary btn-sm"
-          style={{ padding: '0.35rem 0.6rem' }}
-          title="ออกจากระบบ"
-        >
-          <LogOut size={16} />
-        </button>
+        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+          <button
+            onClick={() => setIsSheetsModalOpen(true)}
+            className="btn btn-secondary btn-sm"
+            style={{ padding: '0.35rem 0.6rem', color: '#4ade80' }}
+            title="Google Sheets"
+          >
+            <FileSpreadsheet size={16} />
+          </button>
+          <button
+            onClick={logout}
+            className="btn btn-secondary btn-sm"
+            style={{ padding: '0.35rem 0.6rem' }}
+            title="ออกจากระบบ"
+          >
+            <LogOut size={16} />
+          </button>
+        </div>
       </header>
 
       {/* Mobile Bottom Navigation Bar */}
@@ -122,6 +153,12 @@ export const Navigation = ({ activeTab, setActiveTab, selectedDebtorId, setSelec
           );
         })}
       </nav>
+
+      {/* Google Sheets Modal */}
+      <GoogleSheetsModal
+        isOpen={isSheetsModalOpen}
+        onClose={() => setIsSheetsModalOpen(false)}
+      />
     </>
   );
 };

@@ -11,6 +11,7 @@ import {
   ExternalLink
 } from 'lucide-react';
 import { apiFetch, formatCurrency } from '../services/api';
+import { DBEngine } from '../services/dbEngine';
 
 export const MonthlySummary = ({ onSelectDebtor }) => {
   const now = new Date();
@@ -18,22 +19,123 @@ export const MonthlySummary = ({ onSelectDebtor }) => {
   const [month, setMonth] = useState(String(now.getMonth() + 1));
   const [selectedDebtorId, setSelectedDebtorId] = useState('');
 
-  const [summaryData, setSummaryData] = useState(null);
-  const [debtorsDropdown, setDebtorsDropdown] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const calculateMonthlyFromState = (state, y, m, dId) => {
+    const debtors = (state.debtors || []).filter(d => !dId || Number(d.id) === Number(dId));
+    const allJobs = state.jobs || [];
+    const monthStr = `${y}-${String(m).padStart(2, '0')}`;
+
+    const currentMonthJobs = allJobs.filter(j => {
+      if (!j.job_date || !String(j.job_date).startsWith(monthStr)) return false;
+      if (dId && Number(j.debtor_id) !== Number(dId)) return false;
+      return true;
+    });
+
+    const priorMonthJobs = allJobs.filter(j => {
+      if (!j.job_date || String(j.job_date).substring(0, 7) >= monthStr) return false;
+      return true;
+    });
+
+    const totalWage = currentMonthJobs.reduce((sum, j) => sum + (Number(j.wage) || 0), 0);
+    const totalAdvance = currentMonthJobs.reduce((sum, j) => sum + (Number(j.advance_withdraw) || 0), 0);
+    const totalDeduction = currentMonthJobs.reduce((sum, j) => sum + (Number(j.debt_deduction) || 0), 0);
+    const activeDebtorsCount = new Set(currentMonthJobs.map(j => Number(j.debtor_id))).size;
+
+    let totalStartDebt = 0;
+    let totalEndDebt = 0;
+    let paidInFullCount = 0;
+
+    const debtorRows = debtors.map(d => {
+      const id = Number(d.id);
+      const initialDebt = Number(d.initial_debt) || 0;
+      const dMonthJobs = currentMonthJobs.filter(j => Number(j.debtor_id) === id);
+      const dPriorJobs = priorMonthJobs.filter(j => Number(j.debtor_id) === id);
+
+      const mWage = dMonthJobs.reduce((sum, j) => sum + (Number(j.wage) || 0), 0);
+      const mAdvance = dMonthJobs.reduce((sum, j) => sum + (Number(j.advance_withdraw) || 0), 0);
+      const mDeduction = dMonthJobs.reduce((sum, j) => sum + (Number(j.debt_deduction) || 0), 0);
+      const priorPaid = dPriorJobs.reduce((sum, j) => sum + (Number(j.debt_deduction) || 0), 0);
+      const startDebt = Math.max(0, initialDebt - priorPaid);
+      const endDebt = Math.max(0, startDebt - mDeduction);
+
+      totalStartDebt += startDebt;
+      totalEndDebt += endDebt;
+      if ((endDebt === 0 && initialDebt > 0) || d.status === 'paid_in_full') paidInFullCount++;
+
+      return {
+        debtor_id: id,
+        debtor_code: d.code,
+        debtor_name: d.name,
+        debtor_phone: d.phone,
+        initial_debt: initialDebt,
+        status: d.status,
+        monthly_wage: mWage,
+        monthly_advance: mAdvance,
+        monthly_deduction: mDeduction,
+        job_count: dMonthJobs.length,
+        start_debt: startDebt,
+        end_debt: endDebt
+      };
+    });
+
+    return {
+      summary: {
+        year: y,
+        month: String(m).padStart(2, '0'),
+        total_wage: totalWage,
+        total_advance: totalAdvance,
+        total_deduction: totalDeduction,
+        start_month_debt: totalStartDebt,
+        end_month_debt: totalEndDebt,
+        active_debtors_count: activeDebtorsCount,
+        paid_in_full_count: paidInFullCount
+      },
+      debtors: debtorRows
+    };
+  };
+
+  const [summaryData, setSummaryData] = useState(() => {
+    try {
+      const state = DBEngine.getState();
+      return calculateMonthlyFromState(state, String(now.getFullYear()), String(now.getMonth() + 1), '');
+    } catch (e) {
+      return null;
+    }
+  });
+
+  const [debtorsDropdown, setDebtorsDropdown] = useState(() => {
+    try {
+      const state = DBEngine.getState();
+      return state && Array.isArray(state.debtors) ? state.debtors : [];
+    } catch (e) {
+      return [];
+    }
+  });
+
+  const [loading, setLoading] = useState(false);
 
   const fetchMonthlySummary = async () => {
     try {
-      setLoading(true);
+      // 1. Instant local calculation (0ms)
+      const localState = DBEngine.getState();
+      if (localState && Array.isArray(localState.debtors) && localState.debtors.length > 0) {
+        setSummaryData(calculateMonthlyFromState(localState, year, month, selectedDebtorId));
+      }
+
+      // 2. Fetch fresh summary from API
       const params = new URLSearchParams();
       params.append('year', year);
       params.append('month', month);
       if (selectedDebtorId) params.append('debtor_id', selectedDebtorId);
 
       const res = await apiFetch(`/monthly-summary?${params.toString()}`);
-      setSummaryData(res);
+      if (res && res.summary) {
+        setSummaryData(res);
+      }
     } catch (err) {
-      console.error('Failed to fetch monthly summary:', err);
+      const localState = DBEngine.getState();
+      if (localState && Array.isArray(localState.debtors)) {
+        setSummaryData(calculateMonthlyFromState(localState, year, month, selectedDebtorId));
+      }
     } finally {
       setLoading(false);
     }
@@ -42,9 +144,19 @@ export const MonthlySummary = ({ onSelectDebtor }) => {
   const fetchDebtorsDropdown = async () => {
     try {
       const res = await apiFetch('/debtors?limit=500');
-      setDebtorsDropdown(res.debtors || []);
+      if (res && Array.isArray(res.debtors) && res.debtors.length > 0) {
+        setDebtorsDropdown(res.debtors);
+      } else {
+        const state = DBEngine.getState();
+        if (state && Array.isArray(state.debtors)) {
+          setDebtorsDropdown(state.debtors);
+        }
+      }
     } catch (err) {
-      console.error('Failed to fetch debtors dropdown:', err);
+      const state = DBEngine.getState();
+      if (state && Array.isArray(state.debtors)) {
+        setDebtorsDropdown(state.debtors);
+      }
     }
   };
 
