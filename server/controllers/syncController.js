@@ -66,7 +66,7 @@ export const pullState = async (req, res) => {
     });
   } catch (err) {
     console.error('Pull state error:', err);
-    res.status(500).json({ message: err.message || 'เกิดข้อผิดพลาดในการดึงข้อมูลจาก Google Sheets' });
+    res.status(500).json({ message: err.message || 'เกิดข้อผิดพลาดในการดึงข้อมูลจากระบบ' });
   }
 };
 
@@ -75,11 +75,6 @@ export const pushState = async (req, res) => {
     const { state } = req.body;
     if (!state) {
       return res.status(400).json({ message: 'ไม่พบข้อมูล state ในการบันทึก' });
-    }
-
-    // Direct push to Google Sheets Web App
-    if (isGoogleSheetsConfigured) {
-      await fetchFromGoogleSheets({ action: 'push', state });
     }
 
     if (Array.isArray(state.debtors)) {
@@ -119,9 +114,24 @@ export const pushState = async (req, res) => {
       await recalculateDebtorHistory(Number(d.id), req.user?.id);
     }
 
+    // Direct single batch sync to Google Sheets (One fast HTTP call)
+    if (isGoogleSheetsConfigured) {
+      const finalDebtors = (await dbAll('SELECT * FROM debtors')) || [];
+      const finalJobs = (await dbAll('SELECT * FROM jobs')) || [];
+      const finalTx = (await dbAll('SELECT * FROM debt_transactions')) || [];
+      await fetchFromGoogleSheets({
+        action: 'push',
+        state: {
+          debtors: finalDebtors,
+          jobs: finalJobs,
+          transactions: finalTx
+        }
+      });
+    }
+
     return await pullState(req, res);
   } catch (err) {
     console.error('Push state error:', err);
-    res.status(500).json({ message: err.message || 'เกิดข้อผิดพลาดในการบันทึกข้อมูลลง Google Sheets' });
+    res.status(500).json({ message: err.message || 'เกิดข้อผิดพลาดในการบันทึกข้อมูล' });
   }
 };
