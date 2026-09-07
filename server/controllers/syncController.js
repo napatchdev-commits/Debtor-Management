@@ -1,100 +1,13 @@
-import { dbAll, dbRun, isGoogleSheetsConfigured, getSupabaseClient } from '../db.js';
+import { dbAll, dbRun } from '../db.js';
 import { recalculateDebtorHistory } from '../services/recalculateService.js';
 
 export const pullState = async (req, res) => {
   try {
-    if (isGoogleSheetsConfigured) {
-      const rawDebtors = (await dbAll('SELECT * FROM debtors')) || [];
-      const rawJobs = (await dbAll('SELECT * FROM jobs')) || [];
-      const rawTx = (await dbAll('SELECT * FROM debt_transactions')) || [];
+    const rawDebtors = (await dbAll('SELECT * FROM debtors')) || [];
+    const rawJobs = (await dbAll('SELECT * FROM jobs')) || [];
+    const rawTx = (await dbAll('SELECT * FROM debt_transactions')) || [];
 
-      const jobs = rawJobs.map(j => ({
-        ...j,
-        id: Number(j.id),
-        debtor_id: Number(j.debtor_id),
-        wage: Number(j.wage) || 0,
-        advance_withdraw: Number(j.advance_withdraw) || 0,
-        debt_deduction: Number(j.debt_deduction) || 0,
-        net_wage: Number(j.net_wage) || 0,
-        debtor_code: j.debtor_code || '',
-        debtor_name: j.debtor_name || ''
-      }));
-
-      const paidMap = jobs.reduce((acc, j) => {
-        acc[j.debtor_id] = (acc[j.debtor_id] || 0) + j.debt_deduction;
-        return acc;
-      }, {});
-
-      const debtors = rawDebtors.map(d => {
-        const id = Number(d.id);
-        const initial_debt = Number(d.initial_debt) || 0;
-        const paid_amount = paidMap[id] || 0;
-        const remaining_debt = Math.max(0, initial_debt - paid_amount);
-        const status = (remaining_debt <= 0 && initial_debt > 0) ? 'paid_in_full' : (d.status || 'active');
-
-        return {
-          ...d,
-          id,
-          code: d.code || `DB-${id}`,
-          name: d.name || `ลูกหนี้รหัส ${id}`,
-          phone: d.phone || '',
-          initial_debt,
-          paid_amount,
-          remaining_debt,
-          status
-        };
-      });
-
-      const transactions = rawTx.map(t => ({
-        ...t,
-        id: Number(t.id),
-        debtor_id: Number(t.debtor_id),
-        job_id: Number(t.job_id),
-        deducted_amount: Number(t.deducted_amount) || 0,
-        debt_before: Number(t.debt_before) || 0,
-        debt_after: Number(t.debt_after) || 0,
-        debtor_code: t.debtor_code || '',
-        debtor_name: t.debtor_name || '',
-        job_location: t.job_location || ''
-      }));
-
-      return res.json({
-        state: {
-          debtors,
-          jobs,
-          transactions
-        }
-      });
-    }
-
-    const client = getSupabaseClient();
-
-    // 1. Fetch debtors
-    const { data: rawDebtors, error: dErr } = await client
-      .from('debtors')
-      .select('*')
-      .order('created_at', { ascending: false });
-
-    if (dErr) throw dErr;
-
-    // 2. Fetch jobs
-    const { data: rawJobs, error: jErr } = await client
-      .from('jobs')
-      .select('*, debtors(code, name)')
-      .order('job_date', { ascending: false });
-
-    if (jErr) throw jErr;
-
-    // 3. Fetch transactions
-    const { data: rawTx, error: tErr } = await client
-      .from('debt_transactions')
-      .select('*, debtors(code, name), jobs(location)')
-      .order('transaction_date', { ascending: false });
-
-    if (tErr) throw tErr;
-
-    // Map & compute paid_amount / remaining_debt in bulk
-    const jobs = (rawJobs || []).map(j => ({
+    const jobs = rawJobs.map(j => ({
       ...j,
       id: Number(j.id),
       debtor_id: Number(j.debtor_id),
@@ -102,8 +15,8 @@ export const pullState = async (req, res) => {
       advance_withdraw: Number(j.advance_withdraw) || 0,
       debt_deduction: Number(j.debt_deduction) || 0,
       net_wage: Number(j.net_wage) || 0,
-      debtor_code: j.debtors?.code || '',
-      debtor_name: j.debtors?.name || ''
+      debtor_code: j.debtor_code || '',
+      debtor_name: j.debtor_name || ''
     }));
 
     const paidMap = jobs.reduce((acc, j) => {
@@ -111,7 +24,7 @@ export const pullState = async (req, res) => {
       return acc;
     }, {});
 
-    const debtors = (rawDebtors || []).map(d => {
+    const debtors = rawDebtors.map(d => {
       const id = Number(d.id);
       const initial_debt = Number(d.initial_debt) || 0;
       const paid_amount = paidMap[id] || 0;
@@ -131,7 +44,7 @@ export const pullState = async (req, res) => {
       };
     });
 
-    const transactions = (rawTx || []).map(t => ({
+    const transactions = rawTx.map(t => ({
       ...t,
       id: Number(t.id),
       debtor_id: Number(t.debtor_id),
@@ -139,12 +52,12 @@ export const pullState = async (req, res) => {
       deducted_amount: Number(t.deducted_amount) || 0,
       debt_before: Number(t.debt_before) || 0,
       debt_after: Number(t.debt_after) || 0,
-      debtor_code: t.debtors?.code || '',
-      debtor_name: t.debtors?.name || '',
-      job_location: t.jobs?.location || ''
+      debtor_code: t.debtor_code || '',
+      debtor_name: t.debtor_name || '',
+      job_location: t.job_location || ''
     }));
 
-    res.json({
+    return res.json({
       state: {
         debtors,
         jobs,
@@ -153,7 +66,7 @@ export const pullState = async (req, res) => {
     });
   } catch (err) {
     console.error('Pull state error:', err);
-    res.status(500).json({ message: err.message || 'เกิดข้อผิดพลาดในการดึงข้อมูลระบบ' });
+    res.status(500).json({ message: err.message || 'เกิดข้อผิดพลาดในการดึงข้อมูลจาก Google Sheets' });
   }
 };
 
@@ -164,105 +77,46 @@ export const pushState = async (req, res) => {
       return res.status(400).json({ message: 'ไม่พบข้อมูล state ในการบันทึก' });
     }
 
-    if (isGoogleSheetsConfigured) {
-      if (Array.isArray(state.debtors)) {
-        for (const d of state.debtors) {
-          if (d.id && Number(d.id) > 0) {
-            await dbRun(
-              'UPDATE debtors SET code = ?, name = ?, phone = ?, initial_debt = ?, start_date = ?, note = ? WHERE id = ?',
-              [d.code, d.name, d.phone || '', Number(d.initial_debt) || 0, d.start_date, d.note || '', Number(d.id)]
-            );
-          } else {
-            await dbRun(
-              'INSERT INTO debtors (code, name, phone, initial_debt, start_date, note, status) VALUES (?, ?, ?, ?, ?, ?, ?)',
-              [d.code, d.name, d.phone || '', Number(d.initial_debt) || 0, d.start_date, d.note || '', d.status || 'active']
-            );
-          }
-        }
-      }
-
-      if (Array.isArray(state.jobs)) {
-        for (const j of state.jobs) {
-          if (j.id && Number(j.id) > 0) {
-            await dbRun(
-              'UPDATE jobs SET debtor_id = ?, job_date = ?, location = ?, description = ?, wage = ?, advance_withdraw = ?, note = ? WHERE id = ?',
-              [Number(j.debtor_id), j.job_date, j.location, j.description || '', Number(j.wage) || 0, Number(j.advance_withdraw) || 0, j.note || '', Number(j.id)]
-            );
-          } else {
-            await dbRun(
-              'INSERT INTO jobs (debtor_id, job_date, location, description, wage, advance_withdraw, note, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-              [Number(j.debtor_id), j.job_date, j.location, j.description || '', Number(j.wage) || 0, Number(j.advance_withdraw) || 0, j.note || '', req.user?.id]
-            );
-          }
-        }
-      }
-
-      const dbts = (await dbAll('SELECT * FROM debtors')) || [];
-      for (const d of dbts) {
-        await recalculateDebtorHistory(Number(d.id), req.user?.id);
-      }
-
-      return await pullState(req, res);
-    }
-
-    const client = getSupabaseClient();
-
-    // 1. Sync debtors
     if (Array.isArray(state.debtors)) {
       for (const d of state.debtors) {
-        const payload = {
-          code: d.code,
-          name: d.name,
-          phone: d.phone || '',
-          initial_debt: Number(d.initial_debt) || 0,
-          start_date: d.start_date || new Date().toISOString().split('T')[0],
-          note: d.note || '',
-          status: d.status || 'active',
-          updated_at: new Date().toISOString()
-        };
-
         if (d.id && Number(d.id) > 0) {
-          await client.from('debtors').upsert({ id: Number(d.id), ...payload });
+          await dbRun(
+            'UPDATE debtors SET code = ?, name = ?, phone = ?, initial_debt = ?, start_date = ?, note = ? WHERE id = ?',
+            [d.code, d.name, d.phone || '', Number(d.initial_debt) || 0, d.start_date, d.note || '', Number(d.id)]
+          );
         } else {
-          await client.from('debtors').insert(payload);
+          await dbRun(
+            'INSERT INTO debtors (code, name, phone, initial_debt, start_date, note, status) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            [d.code, d.name, d.phone || '', Number(d.initial_debt) || 0, d.start_date, d.note || '', d.status || 'active']
+          );
         }
       }
     }
 
-    // 2. Sync jobs
     if (Array.isArray(state.jobs)) {
       for (const j of state.jobs) {
-        const payload = {
-          debtor_id: Number(j.debtor_id),
-          job_date: j.job_date,
-          location: j.location,
-          description: j.description || '',
-          wage: Number(j.wage) || 0,
-          advance_withdraw: Number(j.advance_withdraw) || 0,
-          note: j.note || '',
-          updated_at: new Date().toISOString()
-        };
-
         if (j.id && Number(j.id) > 0) {
-          await client.from('jobs').upsert({ id: Number(j.id), ...payload });
+          await dbRun(
+            'UPDATE jobs SET debtor_id = ?, job_date = ?, location = ?, description = ?, wage = ?, advance_withdraw = ?, note = ? WHERE id = ?',
+            [Number(j.debtor_id), j.job_date, j.location, j.description || '', Number(j.wage) || 0, Number(j.advance_withdraw) || 0, j.note || '', Number(j.id)]
+          );
         } else {
-          await client.from('jobs').insert(payload);
+          await dbRun(
+            'INSERT INTO jobs (debtor_id, job_date, location, description, wage, advance_withdraw, note, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            [Number(j.debtor_id), j.job_date, j.location, j.description || '', Number(j.wage) || 0, Number(j.advance_withdraw) || 0, j.note || '', req.user?.id]
+          );
         }
       }
     }
 
-    // Recalculate debt balances for all debtors
-    const { data: dbts } = await client.from('debtors').select('id');
-    if (dbts) {
-      for (const d of dbts) {
-        await recalculateDebtorHistory(Number(d.id), req.user?.id);
-      }
+    const dbts = (await dbAll('SELECT * FROM debtors')) || [];
+    for (const d of dbts) {
+      await recalculateDebtorHistory(Number(d.id), req.user?.id);
     }
 
-    // Return fresh pulled state
     return await pullState(req, res);
   } catch (err) {
     console.error('Push state error:', err);
-    res.status(500).json({ message: err.message || 'เกิดข้อผิดพลาดในการบันทึกข้อมูล' });
+    res.status(500).json({ message: err.message || 'เกิดข้อผิดพลาดในการบันทึกข้อมูลลง Google Sheets' });
   }
 };

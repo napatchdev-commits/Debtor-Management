@@ -1,6 +1,6 @@
 /**
  =========================================================================
- GOOGLE APPS SCRIPT FOR DEBTOR MANAGEMENT SYSTEM (GOOGLE SHEETS DATABASE)
+ GOOGLE APPS SCRIPT FOR DEBTOR MANAGEMENT SYSTEM (GOOGLE SHEETS DATABASE 100%)
  =========================================================================
  Instructions:
  1. Open your Google Spreadsheet on Google Drive (https://drive.google.com).
@@ -9,7 +9,7 @@
  4. Click Save (💾).
  5. Click "Deploy" (ทำให้ใช้งานได้) -> "New deployment" (การทำให้ใช้งานได้ใหม่).
  6. Select type: "Web app" (เว็บแอป).
- 7. Execute as: "Me" (ฉัน).
+ 7. Execute as: "Me" (ฉํน).
  8. Who has access: "Anyone" (ทุกคน).
  9. Click "Deploy" and copy the Web App URL (https://script.google.com/macros/s/.../exec).
  =========================================================================
@@ -22,6 +22,39 @@ const SCHEMAS = {
   jobs: ['id', 'debtor_id', 'job_date', 'location', 'description', 'wage', 'advance_withdraw', 'debt_deduction', 'net_wage', 'note', 'created_by', 'created_at', 'updated_at'],
   debt_transactions: ['id', 'debtor_id', 'job_id', 'transaction_date', 'deducted_amount', 'debt_before', 'debt_after', 'created_by', 'created_at'],
   audit_logs: ['id', 'user_id', 'username', 'action', 'details', 'created_at']
+};
+
+// Initial Seed Data (Original System Data)
+const INITIAL_SEED = {
+  users: [
+    [1, 'admin', 'admin123', 'ผู้ดูแลระบบ', 'admin', '2026-05-01T00:00:00.000Z']
+  ],
+  debtors: [
+    [1, 'DB-001', 'นรรฐพล กาบแก้ว', '081-234-5678', 358500, '2026-05-01', 'ลูกหนี้งานหักค่าแรงประจำ', 'active', '2026-05-01T00:00:00.000Z', '2026-09-03T00:00:00.000Z']
+  ],
+  jobs: [
+    [1, 1, '2026-09-03', 'จัดงานธรรมศาสตร์', 'จัดงาน rxtu 2ภาค', 2000, 0, 2000, 0, '', 1, '2026-09-03T00:00:00.000Z', '2026-09-03T00:00:00.000Z'],
+    [2, 1, '2026-09-02', 'จัดงานลาดกระบัง', 'จัดงาน 4ภาค', 1500, 0, 1500, 0, '', 1, '2026-09-02T00:00:00.000Z', '2026-09-02T00:00:00.000Z'],
+    [3, 1, '2026-08-28', 'วัดปากบ่อ', 'จัดงานบวช', 1000, 0, 1000, 0, '', 1, '2026-08-28T00:00:00.000Z', '2026-08-28T00:00:00.000Z'],
+    [4, 1, '2026-08-21', 'จัดงานขึ้นบ้านใหม่', 'ฉากงานขึ้นบ้านใหม่', 1500, 0, 1500, 0, '', 1, '2026-08-21T00:00:00.000Z', '2026-08-21T00:00:00.000Z'],
+    [5, 1, '2026-08-14', 'จัดงานแต่งร้านส้มแก้ว', 'จัดฉากงานแต่ง', 1000, 0, 1000, 0, '', 1, '2026-08-14T00:00:00.000Z', '2026-08-14T00:00:00.000Z'],
+    [6, 1, '2026-07-31', 'จัดงานมหาวิทยาลัยกรุงเทพธนบุรี', 'จัดงานเกษียณ', 1500, 0, 1500, 0, '', 1, '2026-07-31T00:00:00.000Z', '2026-07-31T00:00:00.000Z'],
+    [7, 1, '2026-07-23', 'วัดงานวัดส้ม', 'จัดงานบวช', 1500, 1000, 500, 0, '', 1, '2026-07-23T00:00:00.000Z', '2026-07-23T00:00:00.000Z'],
+    [8, 1, '2026-07-17', 'จัดงานบวชศาลายา', 'จัดงานบวชด่วน', 1500, 500, 1000, 0, '', 1, '2026-07-17T00:00:00.000Z', '2026-07-17T00:00:00.000Z'],
+    [9, 1, '2026-07-17', 'งานทำบุญบ้านสมุทรสาคร', 'จัดงานทำบุญบ้าน', 1500, 0, 1500, 0, '', 1, '2026-07-17T00:00:00.000Z', '2026-07-17T00:00:00.000Z'],
+    [10, 1, '2026-07-16', 'วัดงานบวชราชดำเนิน', 'จัดงานบวช', 1500, 0, 1500, 0, '', 1, '2026-07-16T00:00:00.000Z', '2026-07-16T00:00:00.000Z'],
+    [11, 1, '2026-07-09', 'สิงห์ เบเวอเรช', 'จัดพิธีส่งงานทำบุญ', 1000, 0, 1000, 0, '', 1, '2026-07-09T00:00:00.000Z', '2026-07-09T00:00:00.000Z'],
+    [12, 1, '2026-07-04', 'วัดปากน้ำฝั่งใต้', 'จัดงานบวช', 1500, 0, 1500, 0, '', 1, '2026-07-04T00:00:00.000Z', '2026-07-04T00:00:00.000Z'],
+    [13, 1, '2026-06-19', 'งานบวชหนองหล่ม', 'จัดงานบวชหนองหล่ม', 1500, 0, 1500, 0, '', 1, '2026-06-19T00:00:00.000Z', '2026-06-19T00:00:00.000Z'],
+    [14, 1, '2026-06-08', 'สิงห์ เบเวอเรช', 'จัดฉากงาน QCC', 1000, 0, 1000, 0, '', 1, '2026-06-08T00:00:00.000Z', '2026-06-08T00:00:00.000Z'],
+    [15, 1, '2026-06-05', 'งานบวชวัดบางโฉลง', 'จัดงานบวชวัดบางโฉลง', 1500, 0, 1500, 0, '', 1, '2026-06-05T00:00:00.000Z', '2026-06-05T00:00:00.000Z'],
+    [16, 1, '2026-05-23', 'งาน bynior', 'จัดงานรับปริญญา', 1000, 0, 1000, 0, '', 1, '2026-05-23T00:00:00.000Z', '2026-05-23T00:00:00.000Z'],
+    [17, 1, '2026-05-21', 'จัดงานบวชนพรรณ', 'จัดงานบวชสุพรรณบุรี', 1500, 0, 1500, 0, '', 1, '2026-05-21T00:00:00.000Z', '2026-05-21T00:00:00.000Z'],
+    [18, 1, '2026-05-16', 'จัดงานบวชวัดกู้', 'จัดงานบวชวัดประสิทธิ์ อยุธยา', 1500, 0, 1500, 0, '', 1, '2026-05-16T00:00:00.000Z', '2026-05-16T00:00:00.000Z'],
+    [19, 1, '2026-05-15', 'จัดงานบวชวัดชลนที', 'ฉากถ่ายรูป1ภาค', 1000, 0, 1000, 0, '', 1, '2026-05-15T00:00:00.000Z', '2026-05-15T00:00:00.000Z'],
+    [20, 1, '2026-05-08', 'จัดงานบวช นครปฐม', 'จัดงานบวช นครปฐม', 1500, 0, 1500, 0, '', 1, '2026-05-08T00:00:00.000Z', '2026-05-08T00:00:00.000Z'],
+    [21, 1, '2026-05-07', 'บวชบางโทรัด', 'จัดงานบวช', 1500, 0, 1500, 0, '', 1, '2026-05-07T00:00:00.000Z', '2026-05-07T00:00:00.000Z']
+  ]
 };
 
 function doGet(e) {
@@ -65,7 +98,7 @@ function handleRequest(e) {
     }
 
     if (action === 'init') {
-      return jsonResponse({ status: 'ok', message: 'Spreadsheet initialized successfully', state: fetchFullState() });
+      return jsonResponse({ status: 'ok', message: 'Spreadsheet initialized successfully with seed data', state: fetchFullState() });
     }
 
     return jsonResponse({ status: 'ok', state: fetchFullState() });
@@ -91,9 +124,11 @@ function ensureTablesExist() {
       sheet.appendRow(headers);
       sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#1e293b').setFontColor('#ffffff');
       
-      // Default admin user if initializing users table
-      if (tableName === 'users') {
-        sheet.appendRow([1, 'admin', 'admin123', 'ผู้ดูแลระบบ', 'admin', new Date().toISOString()]);
+      // Populate initial seed data if table is empty
+      if (INITIAL_SEED[tableName] && INITIAL_SEED[tableName].length > 0) {
+        INITIAL_SEED[tableName].forEach(function(row) {
+          sheet.appendRow(row);
+        });
       }
     }
   });
@@ -205,7 +240,7 @@ function executeGet(params) {
 }
 
 function executeRun(payload) {
-  const type = payload.type; // 'INSERT', 'UPDATE', 'DELETE'
+  const type = payload.type;
   const table = payload.table;
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(table);
@@ -263,7 +298,6 @@ function executeRun(payload) {
     const values = dataRange.getValues();
     let deletedCount = 0;
 
-    // Delete from bottom to top to preserve row indexes
     for (let r = values.length - 1; r >= 1; r--) {
       const fieldIdx = headers.indexOf(field);
       const colVal = Number(values[r][fieldIdx >= 0 ? fieldIdx : 0]);
