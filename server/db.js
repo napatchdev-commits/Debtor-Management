@@ -95,6 +95,63 @@ export function getIsGoogleSheetsConfigured() {
   return Boolean(runtimeGoogleSheetsUrl && runtimeGoogleSheetsUrl.startsWith('http'));
 }
 
+
+// ---------- Helpers ----------
+export function nextId(list) {
+  return (list || []).reduce((m, x) => Math.max(m, Number(x.id) || 0), 0) + 1;
+}
+
+// Always keep dates as plain "YYYY-MM-DD" (no time / timezone) so a job never jumps to another month
+export function normDate(v) {
+  if (v === undefined || v === null || v === '') return v;
+  if (v instanceof Date) return v.toISOString().slice(0, 10);
+  const m = String(v).match(/^(\d{4}-\d{2}-\d{2})/);
+  return m ? m[1] : v;
+}
+
+// ---------- Google Sheets hydration (serverless-safe) ----------
+// memoryState is wiped on every Vercel cold start / new instance, so before touching data
+// we reload the real data from Google Sheets. We also refuse to push to Sheets until we
+// have loaded from it once, otherwise the built-in seed data would overwrite the real sheet.
+let hydratedFromSheets = false;
+let lastHydrateAt = 0;
+
+export async function hydrateFromGoogleSheets({ maxAgeMs = 0 } = {}) {
+  const base = getGoogleSheetsUrl();
+  if (!base || !base.startsWith('http')) return false;
+  if (hydratedFromSheets && Date.now() - lastHydrateAt < maxAgeMs) return true;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
+  try {
+    const sep = base.includes('?') ? '&' : '?';
+    const res = await fetch(`${base}${sep}action=pull`, { redirect: 'follow', signal: controller.signal });
+    const json = await res.json();
+    if (!json || json.status !== 'ok' || !json.state) throw new Error(json?.message || 'bad response');
+
+    const st = json.state;
+    if (Array.isArray(st.debtors) && st.debtors.length > 0) {
+      memoryState.debtors = st.debtors.map(d => ({ ...d, start_date: normDate(d.start_date) }));
+      memoryState.jobs = (Array.isArray(st.jobs) ? st.jobs : []).map(j => ({ ...j, job_date: normDate(j.job_date) }));
+      memoryState.debt_transactions = (Array.isArray(st.transactions) ? st.transactions : [])
+        .map(t => ({ ...t, transaction_date: normDate(t.transaction_date) }));
+    }
+    // (empty sheet => keep seed, it will be pushed on first write)
+    hydratedFromSheets = true;
+    lastHydrateAt = Date.now();
+    return true;
+  } catch (err) {
+    console.warn('[GoogleSheets] hydrate failed:', err.message);
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export function isHydratedFromSheets() {
+  return hydratedFromSheets;
+}
+
 // Pure High-Speed Database Abstraction Layer
 export const dbRun = async (sql, params = []) => {
   return executeLocalRun(sql, params);
@@ -120,9 +177,8 @@ export async function fetchFromGoogleSheets(payload, signal) {
     return { status: 'ok', state: memoryState };
   }
   try {
-    const encodedPayload = encodeURIComponent(JSON.stringify(payload));
     const separator = targetUrlStr.includes('?') ? '&' : '?';
-    const targetUrl = `${targetUrlStr}${separator}action=${payload.action || 'pull'}&payload=${encodedPayload}`;
+    const targetUrl = `${targetUrlStr}${separator}action=${payload.action || 'pull'}`;
 
     const res = await fetch(targetUrl, {
       method: 'POST',
@@ -148,18 +204,19 @@ export async function fetchFromGoogleSheets(payload, signal) {
  */
 export async function syncToGoogleSheetsBackground() {
   if (!getIsGoogleSheetsConfigured()) return;
+  if (!hydratedFromSheets) {
+    console.warn('[GoogleSheets] skip push: state was never loaded from the sheet (would overwrite real data with seed)');
+    return;
+  }
   try {
     const finalDebtors = (await dbAll('SELECT * FROM debtors')) || [];
     const finalJobs = (await dbAll('SELECT * FROM jobs')) || [];
     const finalTx = (await dbAll('SELECT * FROM debt_transactions')) || [];
-    await fetchFromGoogleSheets({
+    const res = await fetchFromGoogleSheets({
       action: 'push',
-      state: {
-        debtors: finalDebtors,
-        jobs: finalJobs,
-        transactions: finalTx
-      }
+      state: { debtors: finalDebtors, jobs: finalJobs, transactions: finalTx }
     });
+    if (res && res.status === 'ok') lastHydrateAt = Date.now();
   } catch (err) {
     console.warn('[GoogleSheets] Background sync notice:', err.message);
   }
@@ -266,6 +323,8 @@ function executeLocalSelect(sql, params = []) {
       debtor_name: j.debtor_name || debtorMap[Number(j.debtor_id)]?.name || ''
     }));
 
+    rows = rows.map(j => ({ ...j, job_date: normDate(j.job_date) }));
+
     if (sql.includes('WHERE j.id =') || sql.includes('WHERE id =')) {
       const targetId = Number(params[0]);
       if (isNaN(targetId) || targetId <= 0) return [];
@@ -286,6 +345,12 @@ function executeLocalSelect(sql, params = []) {
         );
       }
     }
+  }
+
+  if (table === 'jobs' && upper.includes('ORDER BY') && upper.includes('JOB_DATE')) {
+    const dir = /JOB_DATE\)?\s+DESC/.test(upper) ? -1 : 1;
+    rows = [...rows].sort((a, b) =>
+      dir * (String(a.job_date || '').localeCompare(String(b.job_date || '')) || (Number(a.id) - Number(b.id))));
   }
 
   if (table === 'debt_transactions') {
@@ -327,7 +392,7 @@ function executeLocalRun(sql, params = []) {
   const upper = sql.toUpperCase();
 
   if (upper.startsWith('INSERT INTO USERS')) {
-    const newId = memoryState.users.length + 1;
+    const newId = nextId(memoryState.users);
     const userObj = {
       id: newId,
       username: params[0],
@@ -341,7 +406,7 @@ function executeLocalRun(sql, params = []) {
   }
 
   if (upper.startsWith('INSERT INTO DEBTORS')) {
-    const newId = memoryState.debtors.length + 1;
+    const newId = nextId(memoryState.debtors);
     const debtorObj = {
       id: newId,
       code: params[0],
@@ -382,11 +447,11 @@ function executeLocalRun(sql, params = []) {
   }
 
   if (upper.startsWith('INSERT INTO JOBS')) {
-    const newId = memoryState.jobs.length + 1;
+    const newId = nextId(memoryState.jobs);
     const jobObj = {
       id: newId,
       debtor_id: Number(params[0]),
-      job_date: params[1],
+      job_date: normDate(params[1]),
       location: params[2],
       description: params[3] || '',
       wage: Number(params[4]) || 0,
@@ -415,7 +480,7 @@ function executeLocalRun(sql, params = []) {
     } else if (params.length >= 8) {
       updateData = {
         debtor_id: Number(params[0]),
-        job_date: params[1],
+        job_date: normDate(params[1]),
         location: params[2],
         description: params[3] || '',
         wage: Number(params[4]) || 0,
@@ -434,7 +499,7 @@ function executeLocalRun(sql, params = []) {
   }
 
   if (upper.startsWith('INSERT INTO DEBT_TRANSACTIONS')) {
-    const newId = memoryState.debt_transactions.length + 1;
+    const newId = nextId(memoryState.debt_transactions);
     const txObj = {
       id: newId,
       debtor_id: Number(params[0]),
@@ -451,7 +516,7 @@ function executeLocalRun(sql, params = []) {
   }
 
   if (upper.startsWith('INSERT INTO AUDIT_LOGS')) {
-    const newId = memoryState.audit_logs.length + 1;
+    const newId = nextId(memoryState.audit_logs);
     const logObj = {
       id: newId,
       user_id: params[0] ? Number(params[0]) : null,
