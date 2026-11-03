@@ -159,7 +159,7 @@ export const createJob = async (req, res) => {
     const recalcResult = await recalculateDebtorHistory(numDebtorId, req.user.id);
 
     // Sync to Google Sheets in background if configured
-    syncToGoogleSheetsBackground();
+    await syncToGoogleSheetsBackground();
 
     await logAudit(req.user.id, req.user.username, 'CREATE_JOB', {
       jobId,
@@ -236,7 +236,7 @@ export const updateJob = async (req, res) => {
     const recalcResult = await recalculateDebtorHistory(targetDebtorId, req.user.id);
 
     // Sync to Google Sheets in background if configured
-    syncToGoogleSheetsBackground();
+    await syncToGoogleSheetsBackground();
 
     await logAudit(req.user.id, req.user.username, 'UPDATE_JOB', { jobId: id, debtor_id: targetDebtorId, wage: numWage, advance: numAdvance });
 
@@ -273,7 +273,7 @@ export const deleteJob = async (req, res) => {
     const recalcResult = await recalculateDebtorHistory(debtorId, req.user.id);
 
     // Sync to Google Sheets in background if configured
-    syncToGoogleSheetsBackground();
+    await syncToGoogleSheetsBackground();
 
     await logAudit(req.user.id, req.user.username, 'DELETE_JOB', { jobId: id, debtor_id: debtorId, wage: existing.wage });
 

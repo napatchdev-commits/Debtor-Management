@@ -166,7 +166,7 @@ export const createDebtor = async (req, res) => {
     await logAudit(req.user?.id, req.user?.username, 'CREATE_DEBTOR', { id: insertedId, code: debtorCode, name: name.trim(), initial_debt: numInitialDebt });
 
     // Sync to Google Sheets in background if configured
-    syncToGoogleSheetsBackground();
+    await syncToGoogleSheetsBackground();
 
     const newDebtor = await dbGet('SELECT * FROM debtors WHERE id = ?', [insertedId]);
 
@@ -243,7 +243,7 @@ export const updateDebtor = async (req, res) => {
     await logAudit(req.user?.id, req.user?.username, 'UPDATE_DEBTOR', { id: debtorId, code, name, numInitialDebt });
 
     // Sync to Google Sheets in background if configured
-    syncToGoogleSheetsBackground();
+    await syncToGoogleSheetsBackground();
 
     const updated = await dbGet(`
       SELECT d.*, 
@@ -282,7 +282,7 @@ export const deleteDebtor = async (req, res) => {
     await logAudit(req.user?.id, req.user?.username, 'DELETE_DEBTOR', { id: debtorId });
 
     // Sync to Google Sheets in background if configured
-    syncToGoogleSheetsBackground();
+    await syncToGoogleSheetsBackground();
 
     res.json({ message: 'ลบลูกหนี้เรียบร้อยแล้ว' });
   } catch (err) {
