@@ -13,7 +13,7 @@ import {
   AlertCircle,
   Filter
 } from 'lucide-react';
-import { apiFetch, formatCurrency, formatDate } from '../services/api';
+import { apiFetch, formatCurrency, formatDate, getLocalDateString } from '../services/api';
 import { DBEngine } from '../services/dbEngine';
 import { Modal } from '../components/Modal';
 import { ConfirmModal } from '../components/ConfirmModal';
@@ -51,7 +51,7 @@ export const JobRecords = ({ onSelectDebtor }) => {
 
   // Form states
   const [selectedDebtorId, setSelectedDebtorId] = useState('');
-  const [jobDate, setJobDate] = useState(new Date().toISOString().split('T')[0]);
+  const [jobDate, setJobDate] = useState(() => getLocalDateString());
   const [location, setLocation] = useState('');
   const [description, setDescription] = useState('');
   const [wage, setWage] = useState('');
@@ -173,7 +173,7 @@ export const JobRecords = ({ onSelectDebtor }) => {
 
   const resetForm = () => {
     setSelectedDebtorId('');
-    let defaultDate = new Date().toISOString().split('T')[0];
+    let defaultDate = getLocalDateString();
     if (selectedMonth) {
       const y = selectedYear || 2026;
       const m = String(selectedMonth).padStart(2, '0');
@@ -200,7 +200,7 @@ export const JobRecords = ({ onSelectDebtor }) => {
     fetchDebtorsDropdown();
     setEditingJob(job);
     setSelectedDebtorId(String(job.debtor_id));
-    setJobDate(job.job_date);
+    setJobDate(job.job_date ? String(job.job_date).replace(/^'/, '').split('T')[0] : getLocalDateString());
     setLocation(job.location);
     setDescription(job.description || '');
     setWage(String(job.wage));

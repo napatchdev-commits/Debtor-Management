@@ -62,12 +62,14 @@ export const SEED_TRANSACTIONS = SEED_JOBS.map((j, idx) => ({
 export function normDate(v) {
   if (v === undefined || v === null || v === '') return v;
   if (v instanceof Date) {
-    const midDay = new Date(v.getTime() + 12 * 3600 * 1000);
-    return midDay.toISOString().slice(0, 10);
+    const y = v.getFullYear();
+    const m = String(v.getMonth() + 1).padStart(2, '0');
+    const d = String(v.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
   }
   const str = String(v).trim().replace(/^'/, '');
-  const m = str.match(/^(\d{4}-\d{2}-\d{2})/);
-  if (m) return m[1];
+  const m = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
   const dmy = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
   if (dmy) {
     let y = Number(dmy[3]);

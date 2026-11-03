@@ -11,7 +11,7 @@ import {
   DollarSign, 
   TrendingDown 
 } from 'lucide-react';
-import { apiFetch, formatCurrency, formatDate } from '../services/api';
+import { apiFetch, formatCurrency, formatDate, getLocalDateString } from '../services/api';
 import * as XLSX from 'xlsx';
 
 export const Reports = () => {
@@ -107,7 +107,7 @@ export const Reports = () => {
     const worksheet = XLSX.utils.json_to_sheet(exportRows);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'รายงาน');
-    XLSX.writeFile(workbook, `รายงาน_${reportType}_${new Date().toISOString().split('T')[0]}.xlsx`);
+    XLSX.writeFile(workbook, `รายงาน_${reportType}_${getLocalDateString()}.xlsx`);
   };
 
   // Export / Print PDF (.pdf) via native browser print formatted document

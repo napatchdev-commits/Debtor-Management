@@ -13,7 +13,7 @@ import {
   RefreshCw,
   FileSpreadsheet
 } from 'lucide-react';
-import { apiFetch, formatCurrency, formatDate } from '../services/api';
+import { apiFetch, formatCurrency, formatDate, getLocalDateString } from '../services/api';
 import { DBEngine } from '../services/dbEngine';
 import { Modal } from '../components/Modal';
 import { ConfirmModal } from '../components/ConfirmModal';
@@ -44,7 +44,7 @@ export const Debtors = ({ onSelectDebtor }) => {
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [initialDebt, setInitialDebt] = useState('');
-  const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
+  const [startDate, setStartDate] = useState(() => getLocalDateString());
   const [note, setNote] = useState('');
   const [formError, setFormError] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -124,7 +124,7 @@ export const Debtors = ({ onSelectDebtor }) => {
     setName('');
     setPhone('');
     setInitialDebt('');
-    setStartDate(new Date().toISOString().split('T')[0]);
+    setStartDate(getLocalDateString());
     setNote('');
     setFormError('');
     setEditingDebtor(null);
@@ -145,7 +145,7 @@ export const Debtors = ({ onSelectDebtor }) => {
     setName(debtor.name || '');
     setPhone(debtor.phone || '');
     setInitialDebt(debtor.initial_debt !== undefined ? String(debtor.initial_debt) : '');
-    setStartDate(debtor.start_date || new Date().toISOString().split('T')[0]);
+    setStartDate(debtor.start_date ? String(debtor.start_date).replace(/^'/, '').split('T')[0] : getLocalDateString());
     setNote(debtor.note || '');
     setFormError('');
   };

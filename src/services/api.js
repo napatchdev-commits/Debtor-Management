@@ -47,11 +47,47 @@ export const formatCurrency = (amount) => {
   }).format(num);
 };
 
+export const getLocalDateString = (d = new Date()) => {
+  if (!d) return '';
+  const date = d instanceof Date ? d : new Date(d);
+  if (isNaN(date.getTime())) return '';
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const THAI_MONTHS_SHORT = [
+  'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.',
+  'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'
+];
+
 export const formatDate = (dateString) => {
   if (!dateString) return '-';
   try {
-    const d = new Date(dateString);
-    if (isNaN(d.getTime())) return dateString;
+    const str = String(dateString).trim().replace(/^'/, '');
+    // 1. Direct match ISO / standard date string (YYYY-MM-DD) - 100% timezone-invariant
+    const m = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (m) {
+      const year = Number(m[1]) + 543;
+      const monthIdx = Number(m[2]) - 1;
+      const day = Number(m[3]);
+      const monthName = THAI_MONTHS_SHORT[monthIdx] || m[2];
+      return `${day} ${monthName} ${year}`;
+    }
+    // 2. Direct match DD/MM/YYYY
+    const dmy = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+    if (dmy) {
+      let year = Number(dmy[3]);
+      if (year < 2400) year += 543;
+      const monthIdx = Number(dmy[2]) - 1;
+      const day = Number(dmy[1]);
+      const monthName = THAI_MONTHS_SHORT[monthIdx] || dmy[2];
+      return `${day} ${monthName} ${year}`;
+    }
+    // 3. Fallback for other date objects
+    const d = new Date(str);
+    if (isNaN(d.getTime())) return str;
     return d.toLocaleDateString('th-TH', {
       year: 'numeric',
       month: 'short',
