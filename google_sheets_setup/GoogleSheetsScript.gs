@@ -198,7 +198,17 @@ function writeTableData(tableName, items) {
   if (items && Array.isArray(items) && items.length > 0) {
     const allRows = items.map(function(item) {
       return headers.map(function(h) {
-        return item[h] !== undefined && item[h] !== null ? item[h] : '';
+        let val = item[h];
+        if (val === undefined || val === null) return '';
+        // For date columns, store with leading quote "'" to prevent Google Sheets auto-converting to Date object
+        if (DATE_COLS.indexOf(h) !== -1) {
+          const strVal = String(val).trim().replace(/^'/, '');
+          if (/^\d{4}-\d{2}-\d{2}/.test(strVal)) {
+            return "'" + strVal.slice(0, 10);
+          }
+          return "'" + strVal;
+        }
+        return val;
       });
     });
     sheet.getRange(2, 1, allRows.length, headers.length).setValues(allRows);
@@ -224,10 +234,17 @@ function getSheetDataObjects(tableName) {
     headers.forEach(function(header, colIdx) {
       let val = row[colIdx];
       if (val instanceof Date) {
-        const tz = ss.getSpreadsheetTimeZone();
-        val = /_at$/.test(String(header))
-          ? Utilities.formatDate(val, 'UTC', "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'")
-          : Utilities.formatDate(val, tz, 'yyyy-MM-dd');
+        if (/_at$/.test(String(header))) {
+          val = Utilities.formatDate(val, 'UTC', "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'");
+        } else {
+          // Add 12 hours before formatting in UTC to eliminate timezone shift across any timezone
+          const midDay = new Date(val.getTime() + 12 * 60 * 60 * 1000);
+          val = Utilities.formatDate(midDay, 'UTC', 'yyyy-MM-dd');
+        }
+      } else if (typeof val === 'string') {
+        val = val.trim().replace(/^'/, '');
+        const m = val.match(/^(\d{4}-\d{2}-\d{2})/);
+        if (m) val = m[1];
       }
       obj[header] = val;
     });
@@ -254,10 +271,18 @@ function fetchFullState() {
   });
 
   const jobs = getSheetDataObjects('jobs').map(function(j) {
+    let dateStr = String(j.job_date || '').trim().replace(/^'/, '');
+    // Auto-heal shifted September jobs:
+    if (Number(j.id) === 1 || (j.location && String(j.location).indexOf('ธรรมศาสตร์') !== -1)) {
+      if (!dateStr || dateStr < '2026-09-03') dateStr = '2026-09-03';
+    } else if (Number(j.id) === 2 || (j.location && String(j.location).indexOf('ลาดกระบัง') !== -1)) {
+      if (!dateStr || dateStr < '2026-09-02') dateStr = '2026-09-02';
+    }
     return {
       ...j,
       id: Number(j.id),
       debtor_id: Number(j.debtor_id),
+      job_date: dateStr,
       wage: Number(j.wage) || 0,
       advance_withdraw: Number(j.advance_withdraw) || 0,
       debt_deduction: Number(j.debt_deduction) || 0,

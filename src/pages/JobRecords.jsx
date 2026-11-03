@@ -173,7 +173,13 @@ export const JobRecords = ({ onSelectDebtor }) => {
 
   const resetForm = () => {
     setSelectedDebtorId('');
-    setJobDate(new Date().toISOString().split('T')[0]);
+    let defaultDate = new Date().toISOString().split('T')[0];
+    if (selectedMonth) {
+      const y = selectedYear || 2026;
+      const m = String(selectedMonth).padStart(2, '0');
+      defaultDate = `${y}-${m}-01`;
+    }
+    setJobDate(defaultDate);
     setLocation('');
     setDescription('');
     setWage('');

@@ -67,18 +67,22 @@ export const DebtorProfile = ({ debtorId, onBack }) => {
   // Filter jobs by year/month if selected
   const filteredJobs = jobs.filter((job) => {
     if (!job.job_date) return true;
-    const d = new Date(job.job_date);
-    if (selectedYear && d.getFullYear() !== Number(selectedYear)) return false;
-    if (selectedMonth && (d.getMonth() + 1) !== Number(selectedMonth)) return false;
+    const dateStr = String(job.job_date).slice(0, 10);
+    const jYear = dateStr.slice(0, 4);
+    const jMonth = String(Number(dateStr.slice(5, 7)));
+    if (selectedYear && jYear !== String(selectedYear)) return false;
+    if (selectedMonth && jMonth !== String(Number(selectedMonth))) return false;
     return true;
   });
 
   // Filter transactions by year/month if selected
   const filteredTransactions = transactions.filter((tx) => {
     if (!tx.transaction_date) return true;
-    const d = new Date(tx.transaction_date);
-    if (selectedYear && d.getFullYear() !== Number(selectedYear)) return false;
-    if (selectedMonth && (d.getMonth() + 1) !== Number(selectedMonth)) return false;
+    const dateStr = String(tx.transaction_date).slice(0, 10);
+    const tYear = dateStr.slice(0, 4);
+    const tMonth = String(Number(dateStr.slice(5, 7)));
+    if (selectedYear && tYear !== String(selectedYear)) return false;
+    if (selectedMonth && tMonth !== String(Number(selectedMonth))) return false;
     return true;
   });
 

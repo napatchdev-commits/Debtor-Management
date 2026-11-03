@@ -15,8 +15,37 @@ import { DBEngine } from '../services/dbEngine';
 
 export const MonthlySummary = ({ onSelectDebtor }) => {
   const now = new Date();
-  const [year, setYear] = useState(String(now.getFullYear()));
-  const [month, setMonth] = useState(String(now.getMonth() + 1));
+  const [year, setYear] = useState(() => {
+    try {
+      const state = DBEngine.getState();
+      const allJobs = state?.jobs || [];
+      const sortedJobs = [...allJobs].filter(j => j.job_date).sort((a, b) => String(b.job_date).localeCompare(String(a.job_date)));
+      if (sortedJobs.length > 0) {
+        const latestY = String(sortedJobs[0].job_date).slice(0, 4);
+        if (latestY) return latestY;
+      }
+    } catch (e) {}
+    return String(now.getFullYear());
+  });
+
+  const [month, setMonth] = useState(() => {
+    try {
+      const state = DBEngine.getState();
+      const allJobs = state?.jobs || [];
+      const currentYearMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+      const hasCurrentMonthJobs = allJobs.some(j => j.job_date && String(j.job_date).startsWith(currentYearMonth));
+      if (hasCurrentMonthJobs) {
+        return String(now.getMonth() + 1);
+      }
+      // If current month has 0 jobs, pick latest month with recorded jobs (e.g. September = 9)
+      const sortedJobs = [...allJobs].filter(j => j.job_date).sort((a, b) => String(b.job_date).localeCompare(String(a.job_date)));
+      if (sortedJobs.length > 0) {
+        const latestM = Number(String(sortedJobs[0].job_date).slice(5, 7));
+        if (latestM >= 1 && latestM <= 12) return String(latestM);
+      }
+    } catch (e) {}
+    return String(now.getMonth() + 1);
+  });
   const [selectedDebtorId, setSelectedDebtorId] = useState('');
 
   const calculateMonthlyFromState = (state, y, m, dId) => {

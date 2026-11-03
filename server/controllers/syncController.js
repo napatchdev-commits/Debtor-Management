@@ -1,4 +1,4 @@
-import { dbAll, dbRun, fetchFromGoogleSheets, getIsGoogleSheetsConfigured, getGoogleSheetsUrl, setGoogleSheetsUrl, memoryState, hydrateFromGoogleSheets, isHydratedFromSheets } from '../db.js';
+import { dbAll, dbRun, fetchFromGoogleSheets, getIsGoogleSheetsConfigured, getGoogleSheetsUrl, setGoogleSheetsUrl, memoryState, hydrateFromGoogleSheets, isHydratedFromSheets, normDate, healSeptemberJobs } from '../db.js';
 import { recalculateDebtorHistory } from '../services/recalculateService.js';
 
 export const getSyncConfig = (req, res) => {
@@ -134,11 +134,12 @@ export const pushState = async (req, res) => {
     if (Array.isArray(state.jobs)) {
       for (const j of state.jobs) {
         const jId = Number(j.id);
+        const safeJobDate = normDate(j.job_date);
         const existing = jId > 0 ? (memoryState.jobs || []).find(job => Number(job.id) === jId) : null;
         if (existing) {
           await dbRun(
             'UPDATE jobs SET debtor_id = ?, job_date = ?, location = ?, description = ?, wage = ?, advance_withdraw = ?, note = ? WHERE id = ?',
-            [Number(j.debtor_id), j.job_date, j.location, j.description || '', Number(j.wage) || 0, Number(j.advance_withdraw) || 0, j.note || '', jId]
+            [Number(j.debtor_id), safeJobDate, j.location, j.description || '', Number(j.wage) || 0, Number(j.advance_withdraw) || 0, j.note || '', jId]
           );
         } else {
           const maxJobId = (memoryState.jobs && memoryState.jobs.length > 0) ? Math.max(...memoryState.jobs.map(x => Number(x.id) || 0)) : 0;
@@ -146,7 +147,7 @@ export const pushState = async (req, res) => {
           const newJob = {
             id: newId,
             debtor_id: Number(j.debtor_id),
-            job_date: j.job_date,
+            job_date: safeJobDate,
             location: j.location,
             description: j.description || '',
             wage: Number(j.wage) || 0,
@@ -160,6 +161,7 @@ export const pushState = async (req, res) => {
           memoryState.jobs.push(newJob);
         }
       }
+      memoryState.jobs = healSeptemberJobs(memoryState.jobs);
     }
 
     const dbts = (await dbAll('SELECT * FROM debtors')) || [];

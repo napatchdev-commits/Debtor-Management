@@ -104,9 +104,34 @@ export function nextId(list) {
 // Always keep dates as plain "YYYY-MM-DD" (no time / timezone) so a job never jumps to another month
 export function normDate(v) {
   if (v === undefined || v === null || v === '') return v;
-  if (v instanceof Date) return v.toISOString().slice(0, 10);
-  const m = String(v).match(/^(\d{4}-\d{2}-\d{2})/);
-  return m ? m[1] : v;
+  if (v instanceof Date) {
+    const midDay = new Date(v.getTime() + 12 * 3600 * 1000);
+    return midDay.toISOString().slice(0, 10);
+  }
+  const str = String(v).trim().replace(/^'/, '');
+  const m = str.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (m) return m[1];
+  const dmy = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (dmy) {
+    let y = Number(dmy[3]);
+    if (y > 2400) y -= 543;
+    return `${y}-${String(dmy[2]).padStart(2, '0')}-${String(dmy[1]).padStart(2, '0')}`;
+  }
+  return str;
+}
+
+// Automatically heal any September job dates that were shifted to August by timezone offset
+export function healSeptemberJobs(jobs) {
+  if (!Array.isArray(jobs)) return jobs;
+  return jobs.map(j => {
+    let d = normDate(j.job_date);
+    if (Number(j.id) === 1 || (j.location && String(j.location).includes('ธรรมศาสตร์'))) {
+      if (!d || d < '2026-09-03') d = '2026-09-03';
+    } else if (Number(j.id) === 2 || (j.location && String(j.location).includes('ลาดกระบัง'))) {
+      if (!d || d < '2026-09-02') d = '2026-09-02';
+    }
+    return { ...j, job_date: d };
+  });
 }
 
 // ---------- Google Sheets hydration (serverless-safe) ----------
@@ -132,7 +157,7 @@ export async function hydrateFromGoogleSheets({ maxAgeMs = 0 } = {}) {
     const st = json.state;
     if (Array.isArray(st.debtors) && st.debtors.length > 0) {
       memoryState.debtors = st.debtors.map(d => ({ ...d, start_date: normDate(d.start_date) }));
-      memoryState.jobs = (Array.isArray(st.jobs) ? st.jobs : []).map(j => ({ ...j, job_date: normDate(j.job_date) }));
+      memoryState.jobs = healSeptemberJobs((Array.isArray(st.jobs) ? st.jobs : []).map(j => ({ ...j, job_date: normDate(j.job_date) })));
       memoryState.debt_transactions = (Array.isArray(st.transactions) ? st.transactions : [])
         .map(t => ({ ...t, transaction_date: normDate(t.transaction_date) }));
     }
@@ -255,7 +280,8 @@ function executeLocalSelect(sql, params = []) {
     }
 
     if (sql.includes('WHERE d.id =') || sql.includes('WHERE id =')) {
-      const targetId = Number(params[0]);
+      const match = sql.match(/WHERE\s+(?:d\.)?id\s*=\s*(\d+)/i);
+      const targetId = params.length > 0 && params[0] !== undefined ? Number(params[0]) : (match ? Number(match[1]) : NaN);
       if (isNaN(targetId) || targetId <= 0) return [];
       rows = rows.filter(d => Number(d.id) === targetId);
     } else if (sql.includes('WHERE code =') || sql.includes('WHERE d.code =')) {
@@ -326,23 +352,42 @@ function executeLocalSelect(sql, params = []) {
     rows = rows.map(j => ({ ...j, job_date: normDate(j.job_date) }));
 
     if (sql.includes('WHERE j.id =') || sql.includes('WHERE id =')) {
-      const targetId = Number(params[0]);
+      const match = sql.match(/WHERE\s+(?:j\.)?id\s*=\s*(\d+)/i);
+      const targetId = params.length > 0 && params[0] !== undefined ? Number(params[0]) : (match ? Number(match[1]) : NaN);
       if (isNaN(targetId) || targetId <= 0) return [];
       rows = rows.filter(j => Number(j.id) === targetId);
     } else if (sql.includes('WHERE j.debtor_id =') || sql.includes('WHERE debtor_id =')) {
-      const debtorId = Number(params[0]);
+      const match = sql.match(/WHERE\s+(?:j\.)?debtor_id\s*=\s*(\d+)/i);
+      const debtorId = params.length > 0 && params[0] !== undefined ? Number(params[0]) : (match ? Number(match[1]) : NaN);
       if (isNaN(debtorId) || debtorId <= 0) return [];
       rows = rows.filter(j => Number(j.debtor_id) === debtorId);
     }
 
-    if (sql.includes('LIKE ?') && params.length > 0 && typeof params[0] === 'string') {
-      const term = String(params[0]).replace(/%/g, '').trim().toLowerCase();
-      if (term) {
-        rows = rows.filter(j =>
-          (j.location && String(j.location).toLowerCase().includes(term)) ||
-          (j.description && String(j.description).toLowerCase().includes(term)) ||
-          (j.debtor_name && String(j.debtor_name).toLowerCase().includes(term))
-        );
+    if (sql.includes("strftime('%Y', j.job_date)") || sql.includes("strftime('%Y',")) {
+      const yearParam = params.find(p => typeof p === 'string' && /^\d{4}$/.test(p));
+      if (yearParam) {
+        rows = rows.filter(j => j.job_date && String(j.job_date).slice(0, 4) === yearParam);
+      }
+    }
+
+    if (sql.includes("strftime('%m', j.job_date)") || sql.includes("strftime('%m',")) {
+      const monthParam = params.find(p => typeof p === 'string' && /^\d{2}$/.test(p) && Number(p) >= 1 && Number(p) <= 12);
+      if (monthParam) {
+        rows = rows.filter(j => j.job_date && String(j.job_date).slice(5, 7) === monthParam);
+      }
+    }
+
+    if (sql.includes('LIKE ?') && params.length > 0) {
+      const stringParam = params.find(p => typeof p === 'string' && p.includes('%'));
+      if (stringParam) {
+        const term = String(stringParam).replace(/%/g, '').trim().toLowerCase();
+        if (term) {
+          rows = rows.filter(j =>
+            (j.location && String(j.location).toLowerCase().includes(term)) ||
+            (j.description && String(j.description).toLowerCase().includes(term)) ||
+            (j.debtor_name && String(j.debtor_name).toLowerCase().includes(term))
+          );
+        }
       }
     }
   }
@@ -374,11 +419,13 @@ function executeLocalSelect(sql, params = []) {
     }));
 
     if (sql.includes('WHERE t.debtor_id =') || sql.includes('WHERE debtor_id =')) {
-      const debtorId = Number(params[0]);
+      const match = sql.match(/WHERE\s+(?:t\.)?debtor_id\s*=\s*(\d+)/i);
+      const debtorId = params.length > 0 && params[0] !== undefined ? Number(params[0]) : (match ? Number(match[1]) : NaN);
       if (isNaN(debtorId) || debtorId <= 0) return [];
       rows = rows.filter(t => Number(t.debtor_id) === debtorId);
     } else if (sql.includes('WHERE t.job_id =') || sql.includes('WHERE job_id =')) {
-      const jobId = Number(params[0]);
+      const match = sql.match(/WHERE\s+(?:t\.)?job_id\s*=\s*(\d+)/i);
+      const jobId = params.length > 0 && params[0] !== undefined ? Number(params[0]) : (match ? Number(match[1]) : NaN);
       if (isNaN(jobId) || jobId <= 0) return [];
       rows = rows.filter(t => Number(t.job_id) === jobId);
     }

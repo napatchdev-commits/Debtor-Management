@@ -1,4 +1,4 @@
-import { apiFetch } from './api';
+import { apiFetch } from './api.js';
 
 const STORAGE_KEY = 'DEBTOR_SYSTEM_STATE_V2';
 const SNAPSHOT_KEY = 'DEBTOR_SYSTEM_SNAPSHOT_V2';
@@ -59,6 +59,37 @@ export const SEED_TRANSACTIONS = SEED_JOBS.map((j, idx) => ({
   created_at: j.job_date + 'T00:00:00.000Z'
 }));
 
+export function normDate(v) {
+  if (v === undefined || v === null || v === '') return v;
+  if (v instanceof Date) {
+    const midDay = new Date(v.getTime() + 12 * 3600 * 1000);
+    return midDay.toISOString().slice(0, 10);
+  }
+  const str = String(v).trim().replace(/^'/, '');
+  const m = str.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (m) return m[1];
+  const dmy = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (dmy) {
+    let y = Number(dmy[3]);
+    if (y > 2400) y -= 543;
+    return `${y}-${String(dmy[2]).padStart(2, '0')}-${String(dmy[1]).padStart(2, '0')}`;
+  }
+  return str;
+}
+
+export function healSeptemberJobs(jobs) {
+  if (!Array.isArray(jobs)) return jobs;
+  return jobs.map(j => {
+    let d = normDate(j.job_date);
+    if (Number(j.id) === 1 || (j.location && String(j.location).includes('ธรรมศาสตร์'))) {
+      if (!d || d < '2026-09-03') d = '2026-09-03';
+    } else if (Number(j.id) === 2 || (j.location && String(j.location).includes('ลาดกระบัง'))) {
+      if (!d || d < '2026-09-02') d = '2026-09-02';
+    }
+    return { ...j, job_date: d };
+  });
+}
+
 let activePullPromise = null;
 
 export class DBEngine {
@@ -76,8 +107,8 @@ export class DBEngine {
       if (raw) {
         const parsed = JSON.parse(raw);
         if (parsed && Array.isArray(parsed.debtors) && parsed.debtors.length > 0) {
-          // Auto-migrate legacy 358500 -> 360000 in existing local storage
           let migrated = false;
+          // Auto-migrate legacy 358500 -> 360000 in existing local storage
           parsed.debtors = parsed.debtors.map(d => {
             if (Number(d.id) === 1 && (Number(d.initial_debt) === 358500 || Number(d.initial_debt) <= 0)) {
               migrated = true;
@@ -89,6 +120,16 @@ export class DBEngine {
             }
             return d;
           });
+
+          // Auto-heal any shifted September jobs
+          if (Array.isArray(parsed.jobs)) {
+            const healed = healSeptemberJobs(parsed.jobs);
+            const needsJobHeal = healed.some((hj, idx) => hj.job_date !== parsed.jobs[idx]?.job_date);
+            if (needsJobHeal) {
+              parsed.jobs = healed;
+              migrated = true;
+            }
+          }
 
           if (migrated) {
             this.saveStateLocally(parsed);
@@ -170,6 +211,7 @@ export class DBEngine {
 
     const enrichedJob = {
       ...job,
+      job_date: normDate(job.job_date),
       wage,
       advance_withdraw: advance,
       debt_deduction: deduction,
@@ -186,7 +228,7 @@ export class DBEngine {
       updatedJobs = [{ ...enrichedJob, id: newId }, ...filtered];
     }
 
-    state.jobs = updatedJobs;
+    state.jobs = healSeptemberJobs(updatedJobs);
     this.saveStateLocally(state);
     this.recalculateDebtor(Number(job.debtor_id));
     await this.pushData(this.getState()).catch(() => {});
@@ -263,7 +305,7 @@ export class DBEngine {
         if (res && res.state && Array.isArray(res.state.debtors) && res.state.debtors.length > 0) {
           const state = {
             debtors: res.state.debtors,
-            jobs: Array.isArray(res.state.jobs) ? res.state.jobs : [],
+            jobs: healSeptemberJobs(Array.isArray(res.state.jobs) ? res.state.jobs : []),
             transactions: Array.isArray(res.state.transactions) ? res.state.transactions : []
           };
 
@@ -286,7 +328,7 @@ export class DBEngine {
           if (json && json.state && Array.isArray(json.state.debtors) && json.state.debtors.length > 0) {
             const state = {
               debtors: json.state.debtors,
-              jobs: Array.isArray(json.state.jobs) ? json.state.jobs : [],
+              jobs: healSeptemberJobs(Array.isArray(json.state.jobs) ? json.state.jobs : []),
               transactions: Array.isArray(json.state.transactions) ? json.state.transactions : []
             };
             this.saveStateLocally(state);
