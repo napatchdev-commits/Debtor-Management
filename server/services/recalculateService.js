@@ -24,10 +24,10 @@ export const recalculateDebtorHistory = async (debtorId, userId = null) => {
     await dbRun('DELETE FROM debt_transactions WHERE debtor_id = ?', [numDebtorId]);
 
     // Fetch all jobs for this debtor ordered chronologically by job_date and id
-    const jobs = await dbAll(
-      'SELECT * FROM jobs WHERE debtor_id = ? ORDER BY date(job_date) ASC, id ASC',
-      [numDebtorId]
-    );
+    const jobs = (await dbAll('SELECT * FROM jobs WHERE debtor_id = ?', [numDebtorId]))
+      .sort((a, b) =>
+        String(a.job_date || '').slice(0, 10).localeCompare(String(b.job_date || '').slice(0, 10)) ||
+        (Number(a.id) - Number(b.id)));
 
     let currentDebt = Number(debtor.initial_debt) || 0;
     let accumulatedPaid = 0;

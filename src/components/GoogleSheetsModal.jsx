@@ -68,7 +68,7 @@ export const GoogleSheetsModal = ({ isOpen, onClose, onSyncComplete }) => {
       const state = DBEngine.getState();
       await DBEngine.pushData(state);
       setIsSuccess(true);
-      setMessage('ส่งข้อมูลลูกหนี้และบันทึกงาน (21 รายการ) ไปยัง Google Sheets สำเร็จแล้ว!');
+      setMessage(`ส่งข้อมูลลูกหนี้และบันทึกงาน (${(state.jobs || []).length} รายการ) ไปยัง Google Sheets เรียลไทม์สำเร็จแล้ว!`);
       if (onSyncComplete) onSyncComplete();
       setTimeout(() => setMessage(''), 5000);
     } catch (err) {

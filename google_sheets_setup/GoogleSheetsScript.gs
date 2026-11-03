@@ -21,6 +21,19 @@ const SCHEMAS = {
   audit_logs: ['id', 'user_id', 'username', 'action', 'details', 'created_at']
 };
 
+// Columns holding dates/timestamps: stored as plain text so Google Sheets does not
+// auto-convert them to Date cells (which shifted dates by the timezone offset, e.g. 1 Oct -> 30 Sep).
+const DATE_COLS = ['job_date', 'transaction_date', 'start_date', 'created_at', 'updated_at'];
+
+function applyTextFormatToDateColumns(sheet, tableName) {
+  const headers = SCHEMAS[tableName];
+  headers.forEach(function(h, i) {
+    if (DATE_COLS.indexOf(h) !== -1) {
+      sheet.getRange(1, i + 1, sheet.getMaxRows(), 1).setNumberFormat('@');
+    }
+  });
+}
+
 // Initial Seed Data (Original System Data from Excel)
 const INITIAL_SEED = {
   users: [
@@ -145,6 +158,7 @@ function ensureTablesExist(forcePopulate) {
       sheet = ss.insertSheet(tableName);
     }
     const headers = SCHEMAS[tableName];
+    applyTextFormatToDateColumns(sheet, tableName);
     const lastRow = sheet.getLastRow();
 
     if (lastRow === 0) {
@@ -177,15 +191,18 @@ function writeTableData(tableName, items) {
 
   const headers = SCHEMAS[tableName];
   sheet.clearContents();
+  applyTextFormatToDateColumns(sheet, tableName);
   sheet.appendRow(headers);
   sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#1e293b').setFontColor('#ffffff');
 
-  items.forEach(function(item) {
-    const rowValues = headers.map(function(h) {
-      return item[h] !== undefined ? item[h] : '';
+  if (items && Array.isArray(items) && items.length > 0) {
+    const allRows = items.map(function(item) {
+      return headers.map(function(h) {
+        return item[h] !== undefined && item[h] !== null ? item[h] : '';
+      });
     });
-    sheet.appendRow(rowValues);
-  });
+    sheet.getRange(2, 1, allRows.length, headers.length).setValues(allRows);
+  }
 }
 
 function getSheetDataObjects(tableName) {
@@ -207,7 +224,10 @@ function getSheetDataObjects(tableName) {
     headers.forEach(function(header, colIdx) {
       let val = row[colIdx];
       if (val instanceof Date) {
-        val = val.toISOString().split('T')[0];
+        const tz = ss.getSpreadsheetTimeZone();
+        val = /_at$/.test(String(header))
+          ? Utilities.formatDate(val, 'UTC', "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'")
+          : Utilities.formatDate(val, tz, 'yyyy-MM-dd');
       }
       obj[header] = val;
     });

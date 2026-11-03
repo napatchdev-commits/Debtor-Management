@@ -115,10 +115,10 @@ export const MonthlySummary = ({ onSelectDebtor }) => {
 
   const fetchMonthlySummary = async () => {
     try {
-      // 1. Instant local calculation (0ms)
-      const localState = DBEngine.getState();
-      if (localState && Array.isArray(localState.debtors) && localState.debtors.length > 0) {
-        setSummaryData(calculateMonthlyFromState(localState, year, month, selectedDebtorId));
+      // 1. Pull fresh real-time state from Google Sheets
+      const freshState = await DBEngine.pullData();
+      if (freshState && Array.isArray(freshState.debtors) && freshState.debtors.length > 0) {
+        setSummaryData(calculateMonthlyFromState(freshState, year, month, selectedDebtorId));
       }
 
       // 2. Fetch fresh summary from API

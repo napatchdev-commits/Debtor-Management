@@ -1,4 +1,4 @@
-import { dbRun, dbGet, dbAll } from '../db.js';
+import { dbRun, dbGet, dbAll, syncToGoogleSheetsBackground } from '../db.js';
 import { recalculateDebtorHistory, logAudit } from '../services/recalculateService.js';
 
 export const getDebtors = async (req, res) => {
@@ -165,6 +165,9 @@ export const createDebtor = async (req, res) => {
 
     await logAudit(req.user?.id, req.user?.username, 'CREATE_DEBTOR', { id: insertedId, code: debtorCode, name: name.trim(), initial_debt: numInitialDebt });
 
+    // Sync to Google Sheets in background if configured
+    await syncToGoogleSheetsBackground();
+
     const newDebtor = await dbGet('SELECT * FROM debtors WHERE id = ?', [insertedId]);
 
     res.status(201).json({
@@ -239,6 +242,9 @@ export const updateDebtor = async (req, res) => {
 
     await logAudit(req.user?.id, req.user?.username, 'UPDATE_DEBTOR', { id: debtorId, code, name, numInitialDebt });
 
+    // Sync to Google Sheets in background if configured
+    await syncToGoogleSheetsBackground();
+
     const updated = await dbGet(`
       SELECT d.*, 
         COALESCE(SUM(j.debt_deduction), 0) as paid_amount,
@@ -274,6 +280,9 @@ export const deleteDebtor = async (req, res) => {
     await dbRun('DELETE FROM debtors WHERE id = ?', [debtorId]);
 
     await logAudit(req.user?.id, req.user?.username, 'DELETE_DEBTOR', { id: debtorId });
+
+    // Sync to Google Sheets in background if configured
+    await syncToGoogleSheetsBackground();
 
     res.json({ message: 'ลบลูกหนี้เรียบร้อยแล้ว' });
   } catch (err) {

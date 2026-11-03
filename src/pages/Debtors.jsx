@@ -186,14 +186,14 @@ export const Debtors = ({ onSelectDebtor }) => {
           body: JSON.stringify(payload)
         });
         saved = res?.debtor || { ...editingDebtor, ...payload };
-        DBEngine.updateOrAddDebtor(saved, true);
+        await DBEngine.updateOrAddDebtor(saved, true);
       } else {
         const res = await apiFetch('/debtors', {
           method: 'POST',
           body: JSON.stringify(payload)
         });
         saved = res?.debtor || payload;
-        DBEngine.updateOrAddDebtor(saved, false);
+        await DBEngine.updateOrAddDebtor(saved, false);
       }
 
       setIsAddModalOpen(false);
@@ -221,7 +221,7 @@ export const Debtors = ({ onSelectDebtor }) => {
       await apiFetch(`/debtors/${deletingDebtor.id}`, {
         method: 'DELETE'
       });
-      DBEngine.deleteDebtor(deletingDebtor.id);
+      await DBEngine.deleteDebtor(deletingDebtor.id);
       setDeletingDebtor(null);
       await fetchDebtors();
     } catch (err) {
