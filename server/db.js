@@ -159,7 +159,8 @@ function executeLocalSelect(sql, params = []) {
       return [{ count: rows.length }];
     }
     if (sql.includes('WHERE username =') && params[0]) {
-      rows = rows.filter(u => String(u.username).trim() === String(params[0]).trim());
+      const targetUser = String(params[0]).trim().toLowerCase();
+      rows = rows.filter(u => String(u.username).trim().toLowerCase() === targetUser);
     } else if (sql.includes('WHERE id =') && params[0]) {
       rows = rows.filter(u => Number(u.id) === Number(params[0]));
     }

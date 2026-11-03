@@ -1,16 +1,30 @@
 import React, { useState } from 'react';
-import { CreditCard, Lock, User, UserPlus, LogIn, ShieldAlert } from 'lucide-react';
+import { CreditCard, Lock, User, UserPlus, LogIn, ShieldAlert, Key, Sparkles } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 export const Login = () => {
   const { login, register, systemInitialized } = useAuth();
   const [isRegisterMode, setIsRegisterMode] = useState(!systemInitialized);
 
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
+  const [username, setUsername] = useState('admin');
+  const [password, setPassword] = useState('admin123');
   const [name, setName] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  const handleQuickLogin = async (targetUser, targetPass) => {
+    setUsername(targetUser);
+    setPassword(targetPass);
+    setError('');
+    setLoading(true);
+    try {
+      await login(targetUser, targetPass);
+    } catch (err) {
+      setError(err.message || 'เกิดข้อผิดพลาดในการเข้าสู่ระบบ');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -44,8 +58,8 @@ export const Login = () => {
       padding: '1.5rem',
       background: 'radial-gradient(circle at top right, rgba(59, 130, 246, 0.15), transparent 40%), radial-gradient(circle at bottom left, rgba(139, 92, 246, 0.15), transparent 40%), var(--bg-primary)'
     }}>
-      <div className="card" style={{ width: '100%', maxWidth: '420px', padding: '2rem' }}>
-        <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
+      <div className="card" style={{ width: '100%', maxWidth: '440px', padding: '2rem' }}>
+        <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
           <div className="brand-icon" style={{ width: '56px', height: '56px', margin: '0 auto 1rem auto' }}>
             <CreditCard size={30} />
           </div>
@@ -60,6 +74,54 @@ export const Login = () => {
               : 'ระบบจัดการลูกหนี้หักจากค่าแรง'}
           </p>
         </div>
+
+        {/* Quick 1-Click Login Box for Convenience */}
+        {!isRegisterMode && (
+          <div style={{
+            background: 'rgba(59, 130, 246, 0.08)',
+            border: '1px solid rgba(59, 130, 246, 0.25)',
+            borderRadius: 'var(--radius-md)',
+            padding: '1rem',
+            marginBottom: '1.5rem'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem', fontSize: '0.85rem', fontWeight: 600, color: '#93c5fd' }}>
+              <Sparkles size={16} />
+              <span>เข้าสู่ระบบด่วน 1 คลิก (Quick Login)</span>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              <button
+                type="button"
+                onClick={() => handleQuickLogin('admin', 'admin123')}
+                disabled={loading}
+                className="btn btn-secondary"
+                style={{
+                  justifyContent: 'flex-start',
+                  padding: '0.6rem 0.85rem',
+                  fontSize: '0.85rem',
+                  background: 'rgba(30, 41, 59, 0.8)',
+                  borderColor: 'rgba(59, 130, 246, 0.4)'
+                }}
+              >
+                👑 <strong>เข้าสู่ระบบด้วย Admin</strong> (รหัส: admin123)
+              </button>
+              <button
+                type="button"
+                onClick={() => handleQuickLogin('NaphatDev', 'admin123')}
+                disabled={loading}
+                className="btn btn-secondary"
+                style={{
+                  justifyContent: 'flex-start',
+                  padding: '0.6rem 0.85rem',
+                  fontSize: '0.85rem',
+                  background: 'rgba(30, 41, 59, 0.8)',
+                  borderColor: 'rgba(139, 92, 246, 0.4)'
+                }}
+              >
+                💻 <strong>เข้าสู่ระบบด้วย NaphatDev</strong> (รหัส: admin123)
+              </button>
+            </div>
+          </div>
+        )}
 
         {!systemInitialized && (
           <div style={{
@@ -117,7 +179,7 @@ export const Login = () => {
             <input
               type="text"
               className="form-input"
-              placeholder="กรอกชื่อผู้ใช้"
+              placeholder="กรอกชื่อผู้ใช้ (เช่น admin หรือ NaphatDev)"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               required
@@ -129,7 +191,7 @@ export const Login = () => {
             <input
               type="password"
               className="form-input"
-              placeholder="กรอกรหัสผ่าน"
+              placeholder="กรอกรหัสผ่าน (เช่น admin123)"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
@@ -142,7 +204,7 @@ export const Login = () => {
             disabled={loading}
             style={{ width: '100%', padding: '0.85rem', fontSize: '0.95rem' }}
           >
-            {loading ? 'กำลังทำรายการ...' : (
+            {loading ? 'กำลังเข้าสู่ระบบ...' : (
               isRegisterMode ? (
                 <>
                   <UserPlus size={18} />
