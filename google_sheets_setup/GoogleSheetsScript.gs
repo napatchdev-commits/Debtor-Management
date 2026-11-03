@@ -180,12 +180,14 @@ function writeTableData(tableName, items) {
   sheet.appendRow(headers);
   sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#1e293b').setFontColor('#ffffff');
 
-  items.forEach(function(item) {
-    const rowValues = headers.map(function(h) {
-      return item[h] !== undefined ? item[h] : '';
+  if (items && Array.isArray(items) && items.length > 0) {
+    const allRows = items.map(function(item) {
+      return headers.map(function(h) {
+        return item[h] !== undefined && item[h] !== null ? item[h] : '';
+      });
     });
-    sheet.appendRow(rowValues);
-  });
+    sheet.getRange(2, 1, allRows.length, headers.length).setValues(allRows);
+  }
 }
 
 function getSheetDataObjects(tableName) {

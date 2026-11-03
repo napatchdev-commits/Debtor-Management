@@ -1,12 +1,21 @@
 import express from 'express';
 import cors from 'cors';
-import { initDb } from '../server/db.js';
+import { initDb, setGoogleSheetsUrl } from '../server/db.js';
 import apiRoutes from '../server/routes/api.js';
 
 const app = express();
 
 app.use(cors());
 app.use(express.json());
+
+// Auto-detect and configure Google Sheets URL from client header in real-time
+app.use((req, res, next) => {
+  const gsUrlHeader = req.headers['x-google-sheets-url'];
+  if (gsUrlHeader && typeof gsUrlHeader === 'string' && gsUrlHeader.trim().startsWith('http')) {
+    setGoogleSheetsUrl(gsUrlHeader.trim());
+  }
+  next();
+});
 
 // Support both /api/... and /... routes on Vercel Serverless
 app.use('/api', apiRoutes);

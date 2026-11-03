@@ -84,7 +84,8 @@ export const JobRecords = ({ onSelectDebtor }) => {
       const monthStr = String(selectedMonth).padStart(2, '0');
       jobList = jobList.filter(j => j.job_date && j.job_date.slice(5, 7) === monthStr);
     }
-    return jobList;
+    // Always sort chronologically descending (newest jobs first)
+    return [...jobList].sort((a, b) => String(b.job_date || '').localeCompare(String(a.job_date || '')));
   };
 
   const fetchJobs = async () => {
@@ -255,14 +256,22 @@ export const JobRecords = ({ onSelectDebtor }) => {
           body: JSON.stringify(payload)
         });
         saved = res?.job || { ...editingJob, ...payload };
-        DBEngine.updateOrAddJob(saved, true);
+        await DBEngine.updateOrAddJob(saved, true);
       } else {
         const res = await apiFetch('/jobs', {
           method: 'POST',
           body: JSON.stringify(payload)
         });
         saved = res?.job || payload;
-        DBEngine.updateOrAddJob(saved, false);
+        await DBEngine.updateOrAddJob(saved, false);
+      }
+
+      // If a job is added with a date in a month different from current month filter, clear filter so user can see it immediately
+      if (payload.job_date) {
+        const jobM = String(Number(payload.job_date.slice(5, 7)));
+        if (selectedMonth && selectedMonth !== jobM) {
+          setSelectedMonth('');
+        }
       }
 
       setIsAddModalOpen(false);
@@ -283,7 +292,7 @@ export const JobRecords = ({ onSelectDebtor }) => {
       await apiFetch(`/jobs/${deletingJob.id}`, {
         method: 'DELETE'
       });
-      DBEngine.deleteJob(deletingJob.id, deletingJob.debtor_id);
+      await DBEngine.deleteJob(deletingJob.id, deletingJob.debtor_id);
       setDeletingJob(null);
       await fetchJobs();
       await fetchDebtorsDropdown();

@@ -4,10 +4,12 @@ export const getAuthToken = () => localStorage.getItem('token');
 
 export const apiFetch = async (endpoint, options = {}) => {
   const token = getAuthToken();
+  const gsUrl = localStorage.getItem('GOOGLE_SHEETS_WEBAPP_URL');
   const headers = {
     'Content-Type': 'application/json',
     'Cache-Control': 'no-cache, no-store, must-revalidate',
     'Pragma': 'no-cache',
+    ...(gsUrl && gsUrl.trim().startsWith('http') ? { 'x-google-sheets-url': gsUrl.trim() } : {}),
     ...(options.headers || {})
   };
 

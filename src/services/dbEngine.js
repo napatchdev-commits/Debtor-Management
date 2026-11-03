@@ -115,7 +115,7 @@ export class DBEngine {
     }
   }
 
-  static updateOrAddDebtor(debtor, isEdit) {
+  static async updateOrAddDebtor(debtor, isEdit) {
     const state = this.getState();
     const debtors = state.debtors || [];
     const targetId = Number(debtor.id);
@@ -138,22 +138,22 @@ export class DBEngine {
     state.debtors = updatedDebtors;
     this.saveStateLocally(state);
     this.recalculateDebtor(targetId || 1);
-    this.pushData(this.getState()).catch(() => {});
+    await this.pushData(this.getState()).catch(() => {});
     return this.getState();
   }
 
-  static deleteDebtor(debtorId) {
+  static async deleteDebtor(debtorId) {
     const state = this.getState();
     const dId = Number(debtorId);
     state.debtors = (state.debtors || []).filter(d => Number(d.id) !== dId);
     state.jobs = (state.jobs || []).filter(j => Number(j.debtor_id) !== dId);
     state.transactions = (state.transactions || []).filter(t => Number(t.debtor_id) !== dId);
     this.saveStateLocally(state);
-    this.pushData(state).catch(() => {});
+    await this.pushData(state).catch(() => {});
     return state;
   }
 
-  static updateOrAddJob(job, isEdit) {
+  static async updateOrAddJob(job, isEdit) {
     const state = this.getState();
     const jobs = state.jobs || [];
     const targetId = Number(job.id);
@@ -165,8 +165,8 @@ export class DBEngine {
 
     const wage = Number(job.wage) || 0;
     const advance = Number(job.advance_withdraw) || 0;
-    const deduction = Math.max(0, wage - advance);
-    const net = 0;
+    const deduction = Number(job.debt_deduction) !== undefined ? Number(job.debt_deduction) : Math.max(0, wage - advance);
+    const net = Number(job.net_wage) !== undefined ? Number(job.net_wage) : 0;
 
     const enrichedJob = {
       ...job,
@@ -182,17 +182,18 @@ export class DBEngine {
       updatedJobs = jobs.map(j => Number(j.id) === targetId ? { ...j, ...enrichedJob } : j);
     } else {
       const newId = targetId || (jobs.length > 0 ? Math.max(...jobs.map(j => Number(j.id) || 0)) + 1 : 1);
-      updatedJobs = [{ ...enrichedJob, id: newId }, ...jobs];
+      const filtered = jobs.filter(j => Number(j.id) !== newId);
+      updatedJobs = [{ ...enrichedJob, id: newId }, ...filtered];
     }
 
     state.jobs = updatedJobs;
     this.saveStateLocally(state);
     this.recalculateDebtor(Number(job.debtor_id));
-    this.pushData(this.getState()).catch(() => {});
+    await this.pushData(this.getState()).catch(() => {});
     return this.getState();
   }
 
-  static deleteJob(jobId, debtorId) {
+  static async deleteJob(jobId, debtorId) {
     const state = this.getState();
     const jId = Number(jobId);
     state.jobs = (state.jobs || []).filter(j => Number(j.id) !== jId);
@@ -201,7 +202,7 @@ export class DBEngine {
     if (debtorId) {
       this.recalculateDebtor(Number(debtorId));
     }
-    this.pushData(this.getState()).catch(() => {});
+    await this.pushData(this.getState()).catch(() => {});
     return state;
   }
 
@@ -253,51 +254,57 @@ export class DBEngine {
     }
 
     activePullPromise = (async () => {
+      const gsUrl = this.getGoogleSheetsUrl();
+
+      // 1. Try pulling fresh real-time state from Google Sheets via backend
       try {
         const res = await apiFetch('/sync/pull');
         
         if (res && res.state && Array.isArray(res.state.debtors) && res.state.debtors.length > 0) {
-          const serverDebtors = res.state.debtors.map(d => {
-            if (Number(d.id) === 1 && (Number(d.initial_debt) === 358500 || Number(d.initial_debt) <= 0)) {
-              return {
-                ...d,
-                initial_debt: 360000,
-                remaining_debt: 360000 - (Number(d.paid_amount) || 27500)
-              };
-            }
-            return d;
-          });
-
-          // Safeguard user modifications in localStorage
-          const local = this.getState();
-          const localD1 = (local.debtors || []).find(d => Number(d.id) === 1);
-          if (localD1 && Number(localD1.initial_debt) === 360000) {
-            const sD1 = serverDebtors.find(d => Number(d.id) === 1);
-            if (sD1) {
-              sD1.initial_debt = 360000;
-              sD1.remaining_debt = 360000 - (Number(sD1.paid_amount) || 27500);
-            }
-          }
-
           const state = {
-            debtors: serverDebtors,
-            jobs: Array.isArray(res.state.jobs) && res.state.jobs.length > 0 ? res.state.jobs : (local.jobs || []),
-            transactions: Array.isArray(res.state.transactions) && res.state.transactions.length > 0 ? res.state.transactions : (local.transactions || [])
+            debtors: res.state.debtors,
+            jobs: Array.isArray(res.state.jobs) ? res.state.jobs : [],
+            transactions: Array.isArray(res.state.transactions) ? res.state.transactions : []
           };
 
           this.saveStateLocally(state);
           return state;
         }
       } catch (err) {
-        console.warn('[DBEngine] Sync pull notice, using local database cache:', err);
-      } finally {
-        activePullPromise = null;
+        console.warn('[DBEngine] Backend sync pull failed, checking direct Google Sheets:', err);
+      }
+
+      // 2. Direct browser real-time pull from Google Sheets Web App (100% bypasses serverless cache)
+      if (gsUrl && gsUrl.startsWith('http')) {
+        try {
+          const separator = gsUrl.includes('?') ? '&' : '?';
+          const directRes = await fetch(`${gsUrl}${separator}action=pull`, {
+            method: 'GET',
+            headers: { 'Accept': 'application/json' }
+          });
+          const json = await directRes.json();
+          if (json && json.state && Array.isArray(json.state.debtors) && json.state.debtors.length > 0) {
+            const state = {
+              debtors: json.state.debtors,
+              jobs: Array.isArray(json.state.jobs) ? json.state.jobs : [],
+              transactions: Array.isArray(json.state.transactions) ? json.state.transactions : []
+            };
+            this.saveStateLocally(state);
+            return state;
+          }
+        } catch (directErr) {
+          console.warn('[DBEngine] Direct Google Sheets pull notice:', directErr);
+        }
       }
 
       return this.getState();
     })();
 
-    return activePullPromise;
+    try {
+      return await activePullPromise;
+    } finally {
+      activePullPromise = null;
+    }
   }
 
   static async pullFromSupabase(force = false) {

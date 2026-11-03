@@ -1,6 +1,6 @@
 import express from 'express';
 import cors from 'cors';
-import { initDb } from './db.js';
+import { initDb, setGoogleSheetsUrl } from './db.js';
 import apiRoutes from './routes/api.js';
 
 const app = express();
@@ -8,6 +8,15 @@ const PORT = process.env.PORT || 3001;
 
 app.use(cors());
 app.use(express.json());
+
+// Auto-detect and configure Google Sheets URL from client header in real-time
+app.use((req, res, next) => {
+  const gsUrlHeader = req.headers['x-google-sheets-url'];
+  if (gsUrlHeader && typeof gsUrlHeader === 'string' && gsUrlHeader.trim().startsWith('http')) {
+    setGoogleSheetsUrl(gsUrlHeader.trim());
+  }
+  next();
+});
 
 // API Routes
 app.use('/api', apiRoutes);

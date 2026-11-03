@@ -1,4 +1,4 @@
-import { dbRun, dbGet, dbAll } from '../db.js';
+import { dbRun, dbGet, dbAll, syncToGoogleSheetsBackground } from '../db.js';
 import { recalculateDebtorHistory, logAudit } from '../services/recalculateService.js';
 
 export const getJobs = async (req, res) => {
@@ -158,6 +158,9 @@ export const createJob = async (req, res) => {
     // Trigger full atomic recalculation
     const recalcResult = await recalculateDebtorHistory(numDebtorId, req.user.id);
 
+    // Sync to Google Sheets in background if configured
+    syncToGoogleSheetsBackground();
+
     await logAudit(req.user.id, req.user.username, 'CREATE_JOB', {
       jobId,
       debtor_id: numDebtorId,
@@ -232,6 +235,9 @@ export const updateJob = async (req, res) => {
     // Recalculate target debtor
     const recalcResult = await recalculateDebtorHistory(targetDebtorId, req.user.id);
 
+    // Sync to Google Sheets in background if configured
+    syncToGoogleSheetsBackground();
+
     await logAudit(req.user.id, req.user.username, 'UPDATE_JOB', { jobId: id, debtor_id: targetDebtorId, wage: numWage, advance: numAdvance });
 
     const updatedJob = await dbGet(`
@@ -265,6 +271,9 @@ export const deleteJob = async (req, res) => {
 
     // Recalculate debtor history safely
     const recalcResult = await recalculateDebtorHistory(debtorId, req.user.id);
+
+    // Sync to Google Sheets in background if configured
+    syncToGoogleSheetsBackground();
 
     await logAudit(req.user.id, req.user.username, 'DELETE_JOB', { jobId: id, debtor_id: debtorId, wage: existing.wage });
 

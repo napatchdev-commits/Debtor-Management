@@ -143,6 +143,28 @@ export async function fetchFromGoogleSheets(payload, signal) {
   }
 }
 
+/**
+ * Background auto-sync helper for Google Sheets
+ */
+export async function syncToGoogleSheetsBackground() {
+  if (!getIsGoogleSheetsConfigured()) return;
+  try {
+    const finalDebtors = (await dbAll('SELECT * FROM debtors')) || [];
+    const finalJobs = (await dbAll('SELECT * FROM jobs')) || [];
+    const finalTx = (await dbAll('SELECT * FROM debt_transactions')) || [];
+    await fetchFromGoogleSheets({
+      action: 'push',
+      state: {
+        debtors: finalDebtors,
+        jobs: finalJobs,
+        transactions: finalTx
+      }
+    });
+  } catch (err) {
+    console.warn('[GoogleSheets] Background sync notice:', err.message);
+  }
+}
+
 // Local Zero-Latency Select Engine (0ms execution)
 function executeLocalSelect(sql, params = []) {
   const upper = sql.toUpperCase();

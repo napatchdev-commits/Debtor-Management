@@ -125,32 +125,59 @@ export const pushState = async (req, res) => {
 
     if (Array.isArray(state.debtors)) {
       for (const d of state.debtors) {
-        if (d.id && Number(d.id) > 0) {
+        const dId = Number(d.id);
+        const existing = dId > 0 ? (memoryState.debtors || []).find(x => Number(x.id) === dId) : null;
+        if (existing) {
           await dbRun(
             'UPDATE debtors SET code = ?, name = ?, phone = ?, initial_debt = ?, start_date = ?, note = ? WHERE id = ?',
-            [d.code, d.name, d.phone || '', Number(d.initial_debt) || 0, d.start_date, d.note || '', Number(d.id)]
+            [d.code, d.name, d.phone || '', Number(d.initial_debt) || 0, d.start_date, d.note || '', dId]
           );
         } else {
-          await dbRun(
-            'INSERT INTO debtors (code, name, phone, initial_debt, start_date, note, status) VALUES (?, ?, ?, ?, ?, ?, ?)',
-            [d.code, d.name, d.phone || '', Number(d.initial_debt) || 0, d.start_date, d.note || '', d.status || 'active']
-          );
+          const maxDebtorId = (memoryState.debtors && memoryState.debtors.length > 0) ? Math.max(...memoryState.debtors.map(x => Number(x.id) || 0)) : 0;
+          const newId = dId > 0 ? dId : (maxDebtorId + 1);
+          const newDebtor = {
+            id: newId,
+            code: d.code || `DB-${newId}`,
+            name: d.name || `ลูกหนี้รหัส ${newId}`,
+            phone: d.phone || '',
+            initial_debt: Number(d.initial_debt) || 0,
+            start_date: d.start_date,
+            note: d.note || '',
+            status: d.status || 'active',
+            created_at: d.created_at || new Date().toISOString()
+          };
+          memoryState.debtors.push(newDebtor);
         }
       }
     }
 
     if (Array.isArray(state.jobs)) {
       for (const j of state.jobs) {
-        if (j.id && Number(j.id) > 0) {
+        const jId = Number(j.id);
+        const existing = jId > 0 ? (memoryState.jobs || []).find(job => Number(job.id) === jId) : null;
+        if (existing) {
           await dbRun(
             'UPDATE jobs SET debtor_id = ?, job_date = ?, location = ?, description = ?, wage = ?, advance_withdraw = ?, note = ? WHERE id = ?',
-            [Number(j.debtor_id), j.job_date, j.location, j.description || '', Number(j.wage) || 0, Number(j.advance_withdraw) || 0, j.note || '', Number(j.id)]
+            [Number(j.debtor_id), j.job_date, j.location, j.description || '', Number(j.wage) || 0, Number(j.advance_withdraw) || 0, j.note || '', jId]
           );
         } else {
-          await dbRun(
-            'INSERT INTO jobs (debtor_id, job_date, location, description, wage, advance_withdraw, note, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-            [Number(j.debtor_id), j.job_date, j.location, j.description || '', Number(j.wage) || 0, Number(j.advance_withdraw) || 0, j.note || '', req.user?.id]
-          );
+          const maxJobId = (memoryState.jobs && memoryState.jobs.length > 0) ? Math.max(...memoryState.jobs.map(x => Number(x.id) || 0)) : 0;
+          const newId = jId > 0 ? jId : (maxJobId + 1);
+          const newJob = {
+            id: newId,
+            debtor_id: Number(j.debtor_id),
+            job_date: j.job_date,
+            location: j.location,
+            description: j.description || '',
+            wage: Number(j.wage) || 0,
+            advance_withdraw: Number(j.advance_withdraw) || 0,
+            debt_deduction: Number(j.debt_deduction) || 0,
+            net_wage: Number(j.net_wage) || 0,
+            note: j.note || '',
+            created_by: req.user?.id || 1,
+            created_at: j.created_at || new Date().toISOString()
+          };
+          memoryState.jobs.push(newJob);
         }
       }
     }
